@@ -1,6 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-PyInstaller spec for PredictiveMaintenanceDashboard.exe
+VELTRIX — Predictive Maintenance Dashboard
+PyInstaller spec.
 Build with: pyinstaller app.spec --noconfirm
 """
 
@@ -100,6 +101,8 @@ a = Analysis(
         "gui.machines_dialog",
         "gui.alerts_dialog",
         "gui.export_dialog",
+        "gui.splash_screen",
+        "gui.about_dialog",
     ],
     hookspath=[],
     hooksconfig={},
@@ -113,12 +116,15 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
+_icon_path = os.path.join(HERE, "assets", "icons", "app.ico")
+_icon = _icon_path if os.path.exists(_icon_path) else None
+
 exe = EXE(
     pyz,
     a.scripts,
     [],
     exclude_binaries=True,
-    name="PredictiveMaintenance",
+    name="VELTRIX",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -128,8 +134,8 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=os.path.join(HERE, "assets", "icons", "app.ico") if os.path.exists(
-        os.path.join(HERE, "assets", "icons", "app.ico")) else None,
+    icon=_icon,
+    version_file=None,
 )
 
 coll = COLLECT(
@@ -140,5 +146,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name="PredictiveMaintenance",
+    name="VELTRIX",
 )

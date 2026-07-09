@@ -3,10 +3,12 @@ Main application window.
 Orchestrates: simulator/hardware → AI detection → dashboard update → DB persistence.
 """
 
+import os
 import time
 import logging
 from datetime import datetime
-from PySide6.QtWidgets import QMainWindow, QMessageBox
+from PySide6.QtWidgets import QMainWindow, QMessageBox, QMenuBar
+from PySide6.QtGui import QIcon, QAction
 from PySide6.QtCore import Qt, QTimer, Signal, QObject
 
 from gui.dashboard_widget import DashboardWidget
@@ -15,10 +17,14 @@ from gui.machines_dialog   import MachinesDialog
 from gui.alerts_dialog     import AlertsDialog
 from gui.export_dialog     import ExportDialog
 from gui.hardware_connection_dialog import HardwareConnectionDialog
+from gui.about_dialog       import AboutDialog
 from backend.simulator     import Simulator, generate_vibration_waveform, generate_frequency_bars, generate_current_trend, generate_temp_trend
 from ai.anomaly_detector   import analyze, SensorReading, MachineThresholds
 
 logger = logging.getLogger(__name__)
+
+_BASE  = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_ICONS = os.path.join(_BASE, "assets", "icons")
 
 
 class MainWindow(QMainWindow):
@@ -58,12 +64,22 @@ class MainWindow(QMainWindow):
         self._setup_ui_timer()
 
     def _setup_window(self):
-        self.setWindowTitle("Predictive Maintenance Dashboard")
+        self.setWindowTitle("VELTRIX \u2014 Predictive Maintenance Dashboard")
         self.setMinimumSize(1280, 780)
         self.resize(1440, 860)
 
+        # Window icon
+        for fname in ("app.ico", "app.png"):
+            path = os.path.join(_ICONS, fname)
+            if os.path.exists(path):
+                self.setWindowIcon(QIcon(path))
+                break
+
         self.dashboard = DashboardWidget()
         self.setCentralWidget(self.dashboard)
+
+        # ── Help menu ─────────────────────────────────────────────────────
+        self._build_menu_bar()
 
         # Connect dashboard signals
         self.dashboard.navigate_to.connect(self._handle_navigate)
@@ -72,6 +88,23 @@ class MainWindow(QMainWindow):
         self.dashboard.stop_monitoring.connect(self._stop_monitoring)
         self.dashboard.simulate_load.connect(self._set_simulate_load)
         self.dashboard.hardware_connection_clicked.connect(self._show_hardware_dialog)
+
+    def _build_menu_bar(self):
+        """Create a minimal menu bar with Help → About."""
+        menubar = self.menuBar()
+        menubar.setStyleSheet(
+            "QMenuBar{background: #060b14; color: #94a3b8; font-size: 10px; "
+            "border-bottom: 1px solid #1e2d45;}"
+            "QMenuBar::item:selected{background: #1e2d45; color: #e2e8f0;}"
+            "QMenu{background: #0d1420; border: 1px solid #1e2d45; color: #e2e8f0;}"
+            "QMenu::item:selected{background: #1a2d50;}"
+        )
+
+        help_menu = menubar.addMenu("Help")
+
+        about_action = QAction("About VELTRIX", self)
+        about_action.triggered.connect(self._show_about)
+        help_menu.addAction(about_action)
 
     def _load_initial_data(self):
         machines = self.db.get_machines()
@@ -260,6 +293,11 @@ class MainWindow(QMainWindow):
             self.dashboard.sidebar.load_machines(machines, machines[0]["id"])
 
     # ── Hardware Connection ────────────────────────────────────────────────────
+
+    def _show_about(self):
+        """Show the VELTRIX About dialog."""
+        dlg = AboutDialog(self)
+        dlg.exec()
 
     def _show_hardware_dialog(self):
         """Show hardware connection dialog."""
