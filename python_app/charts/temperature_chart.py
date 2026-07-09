@@ -31,19 +31,31 @@ class TemperatureChart(QWidget):
         self.plot.getAxis("bottom").setTextPen(pg.mkPen(AXIS))
         self.plot.setLabel("bottom", "Time", **{"color": AXIS, "font-size": "9px"})
 
-        # Zone fills
-        self._zone_green  = pg.LinearRegionItem(movable=False)
-        self._zone_yellow = pg.LinearRegionItem(movable=False)
-        self._zone_red    = pg.LinearRegionItem(movable=False)
-        for z, col in [
-            (self._zone_green,  (34,  197, 94,  35)),
-            (self._zone_yellow, (234, 179, 8,   35)),
-            (self._zone_red,    (239, 68,  68,  35)),
+        # Zone fills (pyqtgraph 0.13.x: pass pen/brush in constructor)
+        for bounds, color, orientation in [
+            ((self._temp_min, self._temp_min + (self._temp_max - self._temp_min) * 0.4),
+             (34, 197, 94, 60), 'horizontal'),   # green zone
+            ((self._temp_min + (self._temp_max - self._temp_min) * 0.4,
+              self._temp_min + (self._temp_max - self._temp_min) * 0.7),
+             (234, 179, 8, 60), 'horizontal'),   # yellow zone
+            ((self._temp_min + (self._temp_max - self._temp_min) * 0.7,
+              self._temp_max + (self._temp_max - self._temp_min) * 0.2),
+             (239, 68, 68, 60), 'horizontal'),   # red zone
         ]:
-            z.setBrush(pg.mkBrush(*col))
-            z.setPen(pg.mkPen(None))
-            z.setOrientation('horizontal')
-            self.plot.addItem(z)
+            item = pg.LinearRegionItem(
+                values=bounds,
+                orientation=orientation,
+                movable=False,
+                pen=None,
+                brush=pg.mkBrush(*color),
+            )
+            self.plot.addItem(item)
+            if color[1] == 197:
+                self._zone_green = item
+            elif color[1] == 179:
+                self._zone_yellow = item
+            else:
+                self._zone_red = item
 
         # Main temperature line
         self._curve = self.plot.plot(pen=pg.mkPen("#facc15", width=2))
@@ -72,6 +84,7 @@ class TemperatureChart(QWidget):
         mid = lo + (hi - lo) * 0.4
         warn = lo + (hi - lo) * 0.7
 
+        # pyqtgraph 0.13.x: setRegion is still valid
         self._zone_green.setRegion((lo, mid))
         self._zone_yellow.setRegion((mid, warn))
         self._zone_red.setRegion((warn, hi + (hi - lo) * 0.15))
