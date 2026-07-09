@@ -90,11 +90,12 @@ class AlertLogEntry(QFrame):
 
 
 class DashboardWidget(QWidget):
-    navigate_to = Signal(str)       # 'machines' | 'alerts' | 'analytics' | 'settings'
+    navigate_to = Signal(str)       # 'machines' | 'alerts' | 'analytics' | 'settings' | 'hardware'
     machine_changed = Signal(str)   # machine_id
     start_monitoring = Signal()
     stop_monitoring = Signal()
     simulate_load   = Signal(bool)  # True=on, False=off
+    hardware_connection_clicked = Signal()  # Open hardware dialog
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -283,6 +284,14 @@ class DashboardWidget(QWidget):
         self.btn_simulate = QPushButton("Simulate Load")
         self.btn_simulate.clicked.connect(self._toggle_simulate)
 
+        self.btn_hardware = QPushButton("Hardware Connection")
+        self.btn_hardware.setStyleSheet(
+            "QPushButton{background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #0d4a4a,stop:1 #082828);"
+            "border: 1px solid #0d9488; color: #5eead4; font-weight: bold;}"
+            "QPushButton:hover{background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #106464,stop:1 #0a3a3a);}"
+        )
+        self.btn_hardware.clicked.connect(self.hardware_connection_clicked)
+
         btn_export  = QPushButton("Export Data")
         btn_history = QPushButton("View History")
         btn_limits  = QPushButton("Set Machine Limits")
@@ -291,7 +300,7 @@ class DashboardWidget(QWidget):
         btn_history.clicked.connect(lambda: self.navigate_to.emit("history"))
         btn_limits.clicked.connect(lambda: self.navigate_to.emit("settings"))
 
-        for btn in (self.btn_monitor, self.btn_simulate, btn_export, btn_history, btn_limits):
+        for btn in (self.btn_monitor, self.btn_simulate, self.btn_hardware, btn_export, btn_history, btn_limits):
             ctrl_lay.addWidget(btn)
 
         charts_lay.addWidget(ctrl_bar)

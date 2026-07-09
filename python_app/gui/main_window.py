@@ -14,6 +14,7 @@ from gui.settings_dialog   import SettingsDialog
 from gui.machines_dialog   import MachinesDialog
 from gui.alerts_dialog     import AlertsDialog
 from gui.export_dialog     import ExportDialog
+from gui.hardware_connection_dialog import HardwareConnectionDialog
 from backend.simulator     import Simulator, generate_vibration_waveform, generate_frequency_bars, generate_current_trend, generate_temp_trend
 from ai.anomaly_detector   import analyze, SensorReading, MachineThresholds
 
@@ -35,9 +36,16 @@ class MainWindow(QMainWindow):
         self._snapshot_interval = 5        # seconds
         self._last_reading = None
 
+        # Data source mode: 'simulation' or 'hardware'
+        self._data_source = "simulation"
+
         # Simulator
         self._simulator = Simulator(on_reading=self._on_sim_reading)
         self._sim_tick = 0
+
+        # Hardware connection dialog (created lazily)
+        self._hardware_dialog: HardwareConnectionDialog = None
+        self._hardware_connected = False
 
         # Waveform data buffers
         self._vib_points  = []
@@ -63,6 +71,7 @@ class MainWindow(QMainWindow):
         self.dashboard.start_monitoring.connect(self._start_monitoring)
         self.dashboard.stop_monitoring.connect(self._stop_monitoring)
         self.dashboard.simulate_load.connect(self._set_simulate_load)
+        self.dashboard.hardware_connection_clicked.connect(self._show_hardware_dialog)
 
     def _load_initial_data(self):
         machines = self.db.get_machines()
@@ -250,6 +259,82 @@ class MainWindow(QMainWindow):
             self._select_machine(machines[0]["id"])
             self.dashboard.sidebar.load_machines(machines, machines[0]["id"])
 
+    # ── Hardware Connection ────────────────────────────────────────────────────
+
+    def _show_hardware_dialog(self):
+        """Show hardware connection dialog."""
+        if self._hardware_dialog is None:
+            self._hardware_dialog = HardwareConnectionDialog(self)
+            self._hardware_dialog.sensor_data_received.connect(self._on_hardware_data)
+            self._hardware_dialog.connection_changed.connect(self._on_hardware_connection_changed)
+
+        self._hardware_dialog.show()
+        self._hardware_dialog.raise_()
+        self._hardware_dialog.activateWindow()
+
+    def _on_hardware_connection_changed(self, connected: bool):
+        """Handle hardware connection state change."""
+        self._hardware_connected = connected
+        if connected:
+            self._data_source = "hardware"
+            # Stop simulator if running
+            if self._simulator:
+                self._simulator.stop()
+            # Update dashboard connection indicator
+            self.dashboard.set_connected(True)
+            self.dashboard.conn_lbl.setText("Hardware")
+            self.dashboard.conn_lbl.setStyleSheet("color:#5eead4; font-size:10px; background:transparent;")
+            # Update hardware button style to show connected
+            self.dashboard.btn_hardware.setStyleSheet(
+                "QPushButton{background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #0d5a4a,stop:1 #083828);"
+                "border: 2px solid #14b8a6; color: #99f6e4; font-weight: bold;}"
+                "QPushButton:hover{background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #106464,stop:1 #0a4a4a);}"
+            )
+            logger.info("Hardware connected - live sensor data active")
+        else:
+            self._data_source = "simulation"
+            self.dashboard.set_connected(False)
+            # Restore hardware button style
+            self.dashboard.btn_hardware.setStyleSheet(
+                "QPushButton{background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #0d4a4a,stop:1 #082828);"
+                "border: 1px solid #0d9488; color: #5eead4; font-weight: bold;}"
+                "QPushButton:hover{background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #106464,stop:1 #0a3a3a);}"
+            )
+            logger.info("Hardware disconnected - switched to simulation mode")
+
+    def _on_hardware_data(self, data: dict):
+        """Process live sensor data from ESP32 hardware."""
+        import math
+
+        # Convert hardware data to compatible format
+        vibration = data.get("vibration", 0)
+        # Split vibration into X/Y for display (we only have total RMS from ESP32)
+        rms_x = vibration * 0.6  # Approximate distribution
+        rms_y = vibration * 0.8
+        vibration_rms = vibration
+
+        self._last_reading = type('Reading', (), {
+            'temperature': data.get("temperature", 0),
+            'rms_x': rms_x,
+            'rms_y': rms_y,
+            'vibration_rms': vibration_rms,
+            'current': data.get("current", 0),
+            'rpm': data.get("rpm", 0),
+            'voltage': 220,  # Default
+        })()
+
+        # Generate waveform data for charts based on actual readings
+        self._sim_tick += 1
+        al = 0.3  # Normal anomaly level for hardware data
+
+        self._vib_points  = generate_vibration_waveform(self._sim_tick, al)
+        self._freq_bars   = generate_frequency_bars(al)
+        self._curr_points = generate_current_trend(self._sim_tick, self._last_reading.current)
+        self._temp_points = generate_temp_trend(self._sim_tick, self._last_reading.temperature)
+
     def closeEvent(self, ev):
         self._simulator.stop()
+        # Disconnect hardware cleanly
+        if self._hardware_dialog:
+            self._hardware_dialog.get_manager().disconnect()
         ev.accept()

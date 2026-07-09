@@ -83,6 +83,8 @@ a = Analysis(
         "ai.anomaly_detector",
         "hardware.serial_handler",
         "hardware.wifi_handler",
+        "hardware.serial_manager",
+        "gui.hardware_connection_dialog",
         "backend.api_server",
         "backend.simulator",
         "charts.vibration_chart",
