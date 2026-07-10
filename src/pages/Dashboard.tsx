@@ -39,7 +39,7 @@ export function Dashboard({ onNavigate }: Props) {
   const {
     selectedMachine, monitoring, setMonitoring, simulateLoad, setSimulateLoad,
     vibration, freqBars, currentTrend, tempTrend, temperature, currentVal, rpm, timestamp,
-    unreadCount, refreshMachines, markAlertsRead,
+    unreadCount, refreshMachines, markAlertsRead, saveSetting,
   } = useMonitoring();
 
   const [showAdd, setShowAdd] = useState(false);
@@ -67,7 +67,16 @@ export function Dashboard({ onNavigate }: Props) {
         {/* Left Sidebar */}
         <Sidebar
           onAddMachine={() => setShowAdd(true)}
-          onSaveSettings={() => selectedMachine && setShowLimits(true)}
+          onSaveSettings={async () => {
+            if (!selectedMachine) return;
+            await saveSetting(`machine_${selectedMachine.id}_rms_min`, String(selectedMachine.rms_min), 'thresholds');
+            await saveSetting(`machine_${selectedMachine.id}_rms_max`, String(selectedMachine.rms_max), 'thresholds');
+            await saveSetting(`machine_${selectedMachine.id}_temp_min`, String(selectedMachine.temp_min), 'thresholds');
+            await saveSetting(`machine_${selectedMachine.id}_temp_max`, String(selectedMachine.temp_max), 'thresholds');
+            await saveSetting(`machine_${selectedMachine.id}_current_min`, String(selectedMachine.current_min), 'thresholds');
+            await saveSetting(`machine_${selectedMachine.id}_current_max`, String(selectedMachine.current_max), 'thresholds');
+            setShowLimits(true);
+          }}
         />
 
         {/* Content area */}

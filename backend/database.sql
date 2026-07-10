@@ -10,13 +10,14 @@
 -- 1. USERS (user_profiles - extends auth.users)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS user_profiles (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  email       TEXT NOT NULL UNIQUE,
-  full_name   TEXT NOT NULL DEFAULT '',
-  role        TEXT NOT NULL DEFAULT 'operator'
-              CHECK (role IN ('admin', 'operator', 'viewer')),
-  created_at  TIMESTAMPTZ DEFAULT now(),
-  updated_at  TIMESTAMPTZ DEFAULT now()
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email           TEXT NOT NULL UNIQUE,
+  full_name       TEXT NOT NULL DEFAULT '',
+  role            TEXT NOT NULL DEFAULT 'operator'
+                  CHECK (role IN ('admin', 'operator', 'viewer')),
+  password_hash   TEXT,
+  created_at      TIMESTAMPTZ DEFAULT now(),
+  updated_at      TIMESTAMPTZ DEFAULT now()
 );
 
 ALTER TABLE user_profiles ENABLE ROW LEVEL SECURITY;

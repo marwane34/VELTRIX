@@ -17,6 +17,7 @@ class UserProfile(Base):
     email = Column(String(255), unique=True, nullable=False)
     full_name = Column(String(255), nullable=False, default="")
     role = Column(String(20), nullable=False, default="operator")
+    password_hash = Column(String(255), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(

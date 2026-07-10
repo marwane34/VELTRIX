@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, Cpu, MapPin, Trash2, Settings2, Activity } from 'lucide-react';
+import { Plus, Cpu, MapPin, Trash2, Settings2, Activity, Search } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useMonitoring } from '../contexts/MonitoringContext';
 import { AddMachineModal } from '../components/AddMachineModal';
@@ -11,6 +11,10 @@ export function MachinesPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [editLimits, setEditLimits] = useState<Machine | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [page, setPage] = useState(1);
+  const pageSize = 8;
 
   async function deleteMachine(id: string) {
     if (!confirm('Delete this machine and all its data?')) return;
@@ -23,6 +27,22 @@ export function MachinesPage() {
   function statusColor(s: string) {
     return s === 'online' ? '#22c55e' : s === 'warning' ? '#eab308' : s === 'critical' ? '#ef4444' : '#64748b';
   }
+
+  const filtered = machines.filter((m) => {
+    if (search && !m.name.toLowerCase().includes(search.toLowerCase()) && !(m.location || '').toLowerCase().includes(search.toLowerCase())) return false;
+    if (filterStatus !== 'all' && m.status !== filterStatus) return false;
+    return true;
+  });
+
+  const totalPages = Math.ceil(filtered.length / pageSize);
+  const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
+
+  const tabStyle = (active: boolean) => ({
+    padding: '3px 8px', fontSize: 10, cursor: 'pointer',
+    background: active ? 'linear-gradient(180deg,#1a3a6a 0%,#0f2040 100%)' : 'transparent',
+    border: `1px solid ${active ? '#3b82f6' : '#1e2d45'}`,
+    color: active ? '#93c5fd' : '#64748b',
+  } as React.CSSProperties);
 
   return (
     <div className="flex flex-col h-full" style={{ background: '#0b0f1a' }}>
@@ -41,18 +61,40 @@ export function MachinesPage() {
         </button>
       </div>
 
+      {/* Filters */}
+      <div className="flex items-center gap-3 px-5 py-2 shrink-0" style={{ borderBottom: '1px solid #1e2d45', background: '#080d14' }}>
+        <div className="flex items-center gap-1.5">
+          <Search size={12} className="text-slate-600" />
+          <input
+            type="text"
+            placeholder="Search by name or location..."
+            value={search}
+            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+            style={{ background: '#060b14', border: '1px solid #1e2d45', color: '#e2e8f0', padding: '4px 8px', fontSize: 11, outline: 'none', width: 200 }}
+          />
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="text-xs text-slate-600">Status:</span>
+          {['all', 'online', 'warning', 'critical', 'offline'].map((s) => (
+            <button key={s} style={tabStyle(filterStatus === s)} onClick={() => { setFilterStatus(s); setPage(1); }}>
+              {s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Machine grid */}
       <div className="flex-1 overflow-y-auto p-5">
-        {machines.length === 0 ? (
+        {paginated.length === 0 ? (
           <div className="text-center py-20">
             <Cpu size={40} className="text-slate-700 mx-auto mb-4" />
-            <div className="text-sm text-slate-400 mb-2">No machines configured</div>
-            <div className="text-xs text-slate-600 mb-5">Add your first machine to start monitoring</div>
-            <button onClick={() => setShowAdd(true)} className="btn-monitor px-6 py-2">Add Machine</button>
+            <div className="text-sm text-slate-400 mb-2">{machines.length === 0 ? 'No machines configured' : 'No machines match your filters'}</div>
+            <div className="text-xs text-slate-600 mb-5">{machines.length === 0 ? 'Add your first machine to start monitoring' : 'Try adjusting your search or filters'}</div>
+            {machines.length === 0 && <button onClick={() => setShowAdd(true)} className="btn-monitor px-6 py-2">Add Machine</button>}
           </div>
         ) : (
           <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
-            {machines.map((m) => (
+            {paginated.map((m) => (
               <div key={m.id} className="panel p-4 flex flex-col gap-3">
                 {/* Machine header */}
                 <div className="flex items-start justify-between">
@@ -120,6 +162,29 @@ export function MachinesPage() {
           </div>
         )}
       </div>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-center gap-2 px-5 py-2 shrink-0" style={{ borderTop: '1px solid #1e2d45', background: '#060b14' }}>
+          <button
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={page === 1}
+            className="btn-secondary px-3 py-1 text-xs"
+            style={{ opacity: page === 1 ? 0.4 : 1 }}
+          >
+            Prev
+          </button>
+          <span className="text-xs text-slate-400">Page {page} of {totalPages}</span>
+          <button
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            disabled={page === totalPages}
+            className="btn-secondary px-3 py-1 text-xs"
+            style={{ opacity: page === totalPages ? 0.4 : 1 }}
+          >
+            Next
+          </button>
+        </div>
+      )}
 
       {showAdd && <AddMachineModal onClose={() => setShowAdd(false)} onCreated={refreshMachines} />}
       {editLimits && <SetLimitsModal machine={editLimits} onClose={() => setEditLimits(null)} onSaved={refreshMachines} />}
