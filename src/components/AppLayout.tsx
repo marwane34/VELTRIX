@@ -1,5 +1,5 @@
 import { ReactNode } from 'react';
-import { LayoutDashboard, Cpu, Bell, TrendingUp, LogOut, Activity, Wifi } from 'lucide-react';
+import { LayoutDashboard, Cpu, Bell, TrendingUp, LogOut, Wifi } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useMonitoring } from '../contexts/MonitoringContext';
 
@@ -33,7 +33,11 @@ export function AppLayout({ currentPage, onNavigate, children }: Props) {
         {/* Logo */}
         <div className="flex items-center justify-center w-8 h-8 mb-2"
           style={{ background: 'linear-gradient(135deg,#0d3060 0%,#061830 100%)', border: '1px solid #1e4080' }}>
-          <Activity size={14} className="text-blue-400" />
+          <img
+            src="/assets/veltrix-logo.jpeg"
+            alt="VELTRIX"
+            style={{ width: 22, height: 22, objectFit: 'contain' }}
+          />
         </div>
 
         {/* Nav buttons */}

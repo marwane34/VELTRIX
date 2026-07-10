@@ -165,8 +165,8 @@ class SplashScreen(QWidget):
         p.drawRect(0, 0, w, 3)
 
         # ── Logo ───────────────────────────────────────────────────────────
-        logo_h = 110
-        logo_y = 28
+        logo_h = 130
+        logo_y = 30
         if self._logo_pix and not self._logo_pix.isNull():
             scaled = self._logo_pix.scaledToHeight(logo_h, Qt.SmoothTransformation)
             logo_x = (w - scaled.width()) // 2
@@ -177,38 +177,27 @@ class SplashScreen(QWidget):
             p.setFont(QFont("Arial", 64, QFont.Bold))
             p.drawText(0, logo_y, w, logo_h, Qt.AlignCenter, "V")
 
-        # ── VELTRIX wordmark (if logo doesn't include text) ───────────────
-        if self._logo_pix and not self._logo_pix.isNull():
-            # Check if logo_full was loaded (contains text) or app.png (no text)
-            fname_used = os.path.basename(self._logo_pix.cacheKey().__str__()) if hasattr(self._logo_pix, 'cacheKey') else ""
-            show_wordmark = True
-        else:
-            show_wordmark = True
+        # ── VELTRIX wordmark ───────────────────────────────────────────────
+        wm_y = logo_y + logo_h + 4
 
-        if show_wordmark:
-            wm_y = logo_y + logo_h + 4
+        # "VELTRIX" in large, bold, spaced letters
+        p.setPen(QColor("#e2e8f0"))
+        f_wm = QFont("Segoe UI", 22, QFont.Bold)
+        f_wm.setLetterSpacing(QFont.AbsoluteSpacing, 6)
+        p.setFont(f_wm)
+        p.drawText(0, wm_y, w, 36, Qt.AlignHCenter, "VELTR")
 
-            # "VELTRIX" in large, bold, spaced letters
-            p.setPen(QColor("#e2e8f0"))
-            f_wm = QFont("Segoe UI", 22, QFont.Bold)
-            f_wm.setLetterSpacing(QFont.AbsoluteSpacing, 6)
-            p.setFont(f_wm)
-            p.drawText(0, wm_y, w, 36, Qt.AlignHCenter, "VELTR")
-
-            # Blue "IX" after VELTR
-            f_pre = QFont("Segoe UI", 22, QFont.Bold)
-            f_pre.setLetterSpacing(QFont.AbsoluteSpacing, 6)
-            p.setFont(f_pre)
-            fm = QFontMetrics(f_pre)
-            pre_w = fm.horizontalAdvance("VELTR") + 6 * 4  # letter spacing
-            wm_x = (w - fm.horizontalAdvance("VELTRIX") - 6 * 7) // 2
-            p.setPen(QColor("#3b82f6"))
-            p.drawText(wm_x + fm.horizontalAdvance("VELTR") + 6*5, wm_y, w, 36, Qt.AlignLeft, "IX")
-            p.setPen(QColor("#e2e8f0"))
-            p.drawText(wm_x, wm_y, w, 36, Qt.AlignLeft, "VELTR")
-
-        else:
-            wm_y = logo_y + logo_h + 4
+        # Blue "IX" after VELTR
+        f_pre = QFont("Segoe UI", 22, QFont.Bold)
+        f_pre.setLetterSpacing(QFont.AbsoluteSpacing, 6)
+        p.setFont(f_pre)
+        fm = QFontMetrics(f_pre)
+        pre_w = fm.horizontalAdvance("VELTR") + 6 * 4  # letter spacing
+        wm_x = (w - fm.horizontalAdvance("VELTRIX") - 6 * 7) // 2
+        p.setPen(QColor("#3b82f6"))
+        p.drawText(wm_x + fm.horizontalAdvance("VELTR") + 6*5, wm_y, w, 36, Qt.AlignLeft, "IX")
+        p.setPen(QColor("#e2e8f0"))
+        p.drawText(wm_x, wm_y, w, 36, Qt.AlignLeft, "VELTR")
 
         # ── Blue underline accent under wordmark ──────────────────────────
         ul_y = wm_y + 34

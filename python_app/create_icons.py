@@ -146,8 +146,11 @@ def main():
     )
     print("✓ app.ico (multi-size)")
 
-    # logo_full.png 512×512 with text (dark bg, for splash screen)
-    full = draw_v_logo(512, bg_dark=True, include_text=True)
+    # logo_full.png 512×512 (for splash screen — uses uploaded logo)
+    if base:
+        full = base.resize((512, 512), Image.LANCZOS)
+    else:
+        full = draw_v_logo(512, bg_dark=True, include_text=True)
     full.save(os.path.join(ICONS_DIR, "logo_full.png"), "PNG")
     print("✓ logo_full.png")
 

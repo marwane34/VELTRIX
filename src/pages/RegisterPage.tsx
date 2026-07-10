@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { Activity, Eye, EyeOff, UserPlus } from 'lucide-react';
+import { Eye, EyeOff, UserPlus } from 'lucide-react';
 
 interface Props {
   onNavigateLogin: () => void;
@@ -62,7 +62,11 @@ export function RegisterPage({ onNavigateLogin }: Props) {
                 boxShadow: '0 0 20px rgba(59,130,246,0.2)',
               }}
             >
-              <Activity size={28} className="text-blue-400" />
+              <img
+                src="/assets/veltrix-logo.jpeg"
+                alt="VELTRIX"
+                style={{ width: 48, height: 48, objectFit: 'contain' }}
+              />
             </div>
           </div>
           <h1 className="text-2xl font-bold text-slate-100 tracking-wider">CREATE ACCOUNT</h1>
