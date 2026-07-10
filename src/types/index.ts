@@ -91,3 +91,43 @@ export interface AIAnalysis {
   anomalies: string[];
   recommendation: string;
 }
+
+export type SensorType = 'vibration' | 'temperature' | 'current' | 'frequency' | 'rpm' | 'voltage' | 'multi';
+export type SensorStatus = 'active' | 'inactive' | 'error';
+
+export interface Sensor {
+  id: string;
+  machine_id: string | null;
+  user_id: string;
+  name: string;
+  type: SensorType;
+  channel: string;
+  unit: string;
+  status: SensorStatus;
+  sampling_rate: number;
+  min_value: number;
+  max_value: number;
+  description: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SensorData {
+  id: string;
+  sensor_id: string;
+  machine_id: string;
+  user_id: string;
+  value: number;
+  unit: string;
+  quality: string;
+  recorded_at: string;
+}
+
+export interface Setting {
+  id: string;
+  user_id: string;
+  key: string;
+  value: string;
+  category: string;
+  updated_at: string;
+}

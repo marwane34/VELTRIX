@@ -6,7 +6,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from './AuthContext';
 import { useSimulatedData } from '../hooks/useSimulatedData';
 import { runAIAnalysis } from '../hooks/useAI';
-import type { Machine, Alert, AIAnalysis } from '../types';
+import type { Machine, Alert, AIAnalysis, Sensor, Setting } from '../types';
 import type { VibrationPoint, FreqBar, TrendPoint } from '../hooks/useSimulatedData';
 
 interface MonitoringContextValue {
@@ -30,9 +30,14 @@ interface MonitoringContextValue {
   aiAnalysis: AIAnalysis | null;
   recentAlerts: Alert[];
   unreadCount: number;
+  sensors: Sensor[];
+  settings: Setting[];
   refreshMachines: () => Promise<void>;
+  refreshSensors: () => Promise<void>;
+  refreshSettings: () => Promise<void>;
   markAlertsRead: () => Promise<void>;
   persistSnapshot: () => Promise<void>;
+  saveSetting: (key: string, value: string, category?: string) => Promise<void>;
 }
 
 const MonitoringContext = createContext<MonitoringContextValue | null>(null);
@@ -44,6 +49,8 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
   const [monitoring, setMonitoring] = useState(true);
   const [simulateLoad, setSimulateLoad] = useState(false);
   const [recentAlerts, setRecentAlerts] = useState<Alert[]>([]);
+  const [sensors, setSensors] = useState<Sensor[]>([]);
+  const [settings, setSettings] = useState<Setting[]>([]);
 
   const anomalyLevel = simulateLoad ? 0.75 : 0.35;
   const simData = useSimulatedData(monitoring, anomalyLevel);
@@ -70,6 +77,30 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
     if (data) setMachines(data);
   }
 
+  async function refreshSensors() {
+    if (!user) return;
+    const { data } = await supabase.from('sensors').select('*').eq('user_id', user.id).order('created_at');
+    if (data) setSensors(data);
+  }
+
+  async function refreshSettings() {
+    if (!user) return;
+    const { data } = await supabase.from('settings').select('*').eq('user_id', user.id).order('category');
+    if (data) setSettings(data);
+  }
+
+  async function saveSetting(key: string, value: string, category = 'general') {
+    if (!user) return;
+    await supabase.from('settings').upsert({
+      user_id: user.id,
+      key,
+      value,
+      category,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'user_id,key' });
+    await refreshSettings();
+  }
+
   async function loadAlerts() {
     if (!user) return;
     const { data } = await supabase
@@ -84,6 +115,8 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!user) return;
     refreshMachines();
+    refreshSensors();
+    refreshSettings();
     loadAlerts();
 
     const alertSub = supabase
@@ -112,6 +145,34 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
       rpm: simData.rpm,
       voltage: 220 + (Math.random() - 0.5) * 5,
     });
+
+    // Write to sensor_data table for each sensor type
+    const machineSensors = sensors.filter((s) => s.machine_id === selectedMachine.id);
+    if (machineSensors.length > 0) {
+      const sensorReadings: Record<string, number> = {
+        vibration: +((simData.rmsX + simData.rmsY) / 2).toFixed(3),
+        temperature: simData.temperature,
+        current: simData.currentVal,
+        rpm: simData.rpm,
+        voltage: 220 + (Math.random() - 0.5) * 5,
+      };
+      const sensorUnits: Record<string, string> = {
+        vibration: 'g', temperature: '°C', current: 'A', rpm: 'RPM', voltage: 'V',
+      };
+      const records = machineSensors
+        .filter((s) => s.type in sensorReadings)
+        .map((s) => ({
+          sensor_id: s.id,
+          machine_id: selectedMachine.id,
+          user_id: user.id,
+          value: sensorReadings[s.type],
+          unit: s.unit || sensorUnits[s.type] || '',
+          quality: 'good',
+        }));
+      if (records.length > 0) {
+        await supabase.from('sensor_data').insert(records);
+      }
+    }
 
     await supabase.from('machine_health').upsert({
       machine_id: selectedMachine.id,
@@ -193,6 +254,11 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
         recentAlerts,
         unreadCount,
         refreshMachines,
+        refreshSensors,
+        refreshSettings,
+        saveSetting,
+        sensors,
+        settings,
         markAlertsRead,
         persistSnapshot,
       }}

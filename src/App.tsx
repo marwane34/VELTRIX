@@ -5,12 +5,13 @@ import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
 import { Dashboard } from './pages/Dashboard';
 import { MachinesPage } from './pages/MachinesPage';
+import { SensorsPage } from './pages/SensorsPage';
 import { AlertsPage } from './pages/AlertsPage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
 import { AppLayout } from './components/AppLayout';
 
 type AuthPage = 'login' | 'register';
-type AppPage = 'dashboard' | 'machines' | 'alerts' | 'analytics';
+type AppPage = 'dashboard' | 'machines' | 'sensors' | 'alerts' | 'analytics';
 
 function AppContent() {
   const { user, loading } = useAuth();
@@ -53,6 +54,7 @@ function AppContent() {
       ) : (
         <AppLayout currentPage={appPage} onNavigate={setAppPage}>
           {appPage === 'machines' && <MachinesPage />}
+          {appPage === 'sensors' && <SensorsPage />}
           {appPage === 'alerts' && <AlertsPage />}
           {appPage === 'analytics' && <AnalyticsPage />}
         </AppLayout>
