@@ -1,213 +1,259 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
-  Bell, Search, CheckCheck, Check, AlertTriangle, AlertCircle, Info, Clock, X,
+  Bell, Search, Info, AlertTriangle, AlertOctagon, CheckCircle2,
+  CheckCheck, X, Loader2, Wrench, Check,
 } from 'lucide-react';
 import { useMonitoring } from '../contexts/MonitoringContext';
-import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../components/Toast';
-import type { Alert, AlertSeverity, AlertType } from '../types';
+import { supabase } from '../lib/supabase';
+import type { Alert, AlertSeverity, AlertType, Machine } from '../types';
 
-const severityConfig: Record<AlertSeverity, { color: string; Icon: typeof Info; label: string }> = {
-  info: { color: '#3b82f6', Icon: Info, label: 'Info' },
-  warning: { color: '#eab308', Icon: AlertTriangle, label: 'Warning' },
-  critical: { color: '#ef4444', Icon: AlertCircle, label: 'Critical' },
+interface AlertsPageProps {
+  onNavigate: (page: string) => void;
+}
+
+const severityConfig: Record<AlertSeverity, { icon: typeof Info; color: string; bg: string; label: string }> = {
+  info: { icon: Info, color: '#3b82f6', bg: 'rgba(59,130,246,0.06)', label: 'INFO' },
+  warning: { icon: AlertTriangle, color: '#eab308', bg: 'rgba(234,179,8,0.06)', label: 'WARN' },
+  critical: { icon: AlertOctagon, color: '#ef4444', bg: 'rgba(239,68,68,0.06)', label: 'CRIT' },
 };
 
-const typeLabels: Record<AlertType, string> = {
-  bearing_wear: 'Bearing Wear',
-  overheating: 'Overheating',
-  abnormal_vibration: 'Abnormal Vibration',
-  current_spike: 'Current Spike',
+const typeLabel: Record<AlertType, string> = {
+  bearing_wear: 'Bearing Wear', overheating: 'Overheating',
+  abnormal_vibration: 'Abnormal Vibration', current_spike: 'Current Spike',
   rpm_anomaly: 'RPM Anomaly',
 };
 
-function fmtTime(iso: string) {
+function formatTimestamp(iso: string): string {
   const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString(undefined, { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return 'just now';
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
-type FilterKey = 'all' | 'unread' | 'warning' | 'critical';
-
-interface Props {}
+const inputStyle: React.CSSProperties = {
+  background: '#0a1220', border: '1px solid #1e2d45', color: '#e2e8f0',
+  fontSize: 12, padding: '6px 10px', outline: 'none', width: '100%',
+};
 
 /**
- * Alert management page. Lists alerts with severity icons, machine names and
- * read/unread state; supports filtering, search, mark-all-read and per-alert
- * resolution.
+ * AlertsPage — alert management with severity filters, search, mark-as-read, and resolve.
  */
-export function AlertsPage(_: Props) {
-  const { recentAlerts, markAlertsRead, refreshMachines, machines } = useMonitoring();
+export function AlertsPage({ onNavigate }: AlertsPageProps) {
+  const { recentAlerts, unreadCount, machines, markAlertsRead } = useMonitoring();
+  const { user } = useAuth();
   const { toast } = useToast();
-  const [filter, setFilter] = useState<FilterKey>('all');
+
+  const [alerts, setAlerts] = useState<Alert[]>(recentAlerts);
   const [search, setSearch] = useState('');
-  const [localAlerts, setLocalAlerts] = useState<Alert[]>(recentAlerts);
-  const [resolvingId, setResolvingId] = useState<string | null>(null);
+  const [filter, setFilter] = useState<'all' | 'unread' | AlertSeverity>('all');
+  const [markingAll, setMarkingAll] = useState(false);
+  const [resolving, setResolving] = useState<string | null>(null);
 
-  useEffect(() => { setLocalAlerts(recentAlerts); }, [recentAlerts]);
+  useEffect(() => { setAlerts(recentAlerts); }, [recentAlerts]);
 
-  const machineName = (id: string) => machines.find((m) => m.id === id)?.name ?? 'Unknown';
+  const machineMap = useMemo(() => {
+    const map: Record<string, Machine> = {};
+    machines.forEach((m) => { map[m.id] = m; });
+    return map;
+  }, [machines]);
 
   const filtered = useMemo(() => {
-    return localAlerts.filter((a) => {
+    return alerts.filter((a) => {
       if (filter === 'unread' && a.is_read) return false;
-      if (filter === 'warning' && a.severity !== 'warning') return false;
-      if (filter === 'critical' && a.severity !== 'critical') return false;
+      if (filter !== 'all' && filter !== 'unread' && a.severity !== filter) return false;
       if (search.trim()) {
         const q = search.toLowerCase();
-        if (!a.message.toLowerCase().includes(q) && !typeLabels[a.type].toLowerCase().includes(q) && !machineName(a.machine_id).toLowerCase().includes(q)) return false;
+        const machineName = machineMap[a.machine_id]?.name.toLowerCase() ?? '';
+        if (!a.message.toLowerCase().includes(q) && !a.type.toLowerCase().includes(q) && !machineName.includes(q)) return false;
       }
       return true;
     });
-  }, [localAlerts, filter, search, machines]);
+  }, [alerts, filter, search, machineMap]);
 
-  const unreadCount = localAlerts.filter((a) => !a.is_read).length;
-  const criticalCount = localAlerts.filter((a) => a.severity === 'critical').length;
-
-  const tabs: { key: FilterKey; label: string }[] = [
-    { key: 'all', label: 'All' },
-    { key: 'unread', label: 'Unread' },
-    { key: 'warning', label: 'Warning' },
-    { key: 'critical', label: 'Critical' },
-  ];
+  const counts = useMemo(() => {
+    const c: Record<string, number> = { all: alerts.length, unread: 0, info: 0, warning: 0, critical: 0 };
+    alerts.forEach((a) => { if (!a.is_read) c.unread++; c[a.severity]++; });
+    return c;
+  }, [alerts]);
 
   async function handleMarkAllRead() {
-    await markAlertsRead();
-    setLocalAlerts((prev) => prev.map((a) => ({ ...a, is_read: true })));
-    toast('All alerts marked as read', 'success');
+    setMarkingAll(true);
+    try {
+      await markAlertsRead();
+      setAlerts((prev) => prev.map((a) => ({ ...a, is_read: true })));
+      toast('All alerts marked as read', 'success');
+    } catch (err) {
+      toast('Failed: ' + (err as Error).message, 'error');
+    } finally {
+      setMarkingAll(false);
+    }
   }
 
-  async function handleResolve(a: Alert) {
-    setResolvingId(a.id);
-    const { error } = await supabase.from('alerts').update({ resolved_at: new Date().toISOString(), is_read: true }).eq('id', a.id);
-    setResolvingId(null);
-    if (error) { toast(error.message, 'error'); return; }
-    setLocalAlerts((prev) => prev.filter((x) => x.id !== a.id));
-    toast('Alert resolved', 'success');
+  async function handleResolve(alert: Alert) {
+    setResolving(alert.id);
+    try {
+      const { error } = await supabase.from('alerts').update({ resolved_at: new Date().toISOString() }).eq('id', alert.id);
+      if (error) throw error;
+      setAlerts((prev) => prev.filter((a) => a.id !== alert.id));
+      toast('Alert resolved', 'success');
+    } catch (err) {
+      toast('Failed to resolve: ' + (err as Error).message, 'error');
+    } finally {
+      setResolving(null);
+    }
   }
 
-  const inputStyle: React.CSSProperties = {
-    background: '#080d14', border: '1px solid #1e2d45', color: '#e2e8f0', fontSize: 11, padding: '5px 8px 5px 26px', outline: 'none',
-  };
+  async function handleMarkRead(alert: Alert) {
+    try {
+      const { error } = await supabase.from('alerts').update({ is_read: true }).eq('id', alert.id);
+      if (error) throw error;
+      setAlerts((prev) => prev.map((a) => (a.id === alert.id ? { ...a, is_read: true } : a)));
+    } catch (err) {
+      toast('Failed: ' + (err as Error).message, 'error');
+    }
+  }
 
   return (
-    <div className="flex flex-col h-full" style={{ background: '#0b0f1a' }}>
+    <div className="flex flex-col" style={{ height: '100%', background: '#060b14' }}>
       {/* Header */}
-      <div className="flex items-center gap-3 px-4 py-3 flex-shrink-0" style={{ borderBottom: '1px solid #1e2d45', background: 'linear-gradient(180deg,#0d1525 0%,#080d14 100%)' }}>
-        <Bell size={18} className="text-blue-400" />
-        <span className="text-sm font-bold text-slate-100 tracking-wide">ALERT MANAGEMENT</span>
-        <span className="px-2 py-0.5 text-[10px] font-semibold text-slate-300" style={{ background: '#1a2540', border: '1px solid #2a3f60' }}>
-          {localAlerts.length}
-        </span>
-        {unreadCount > 0 && (
-          <span className="px-2 py-0.5 text-[10px] font-semibold text-white" style={{ background: 'rgba(239,68,68,0.2)', border: '1px solid rgba(239,68,68,0.5)', color: '#f87171' }}>
-            {unreadCount} unread
+      <div className="flex items-center justify-between" style={{ padding: '12px 16px', borderBottom: '1px solid #1e2d45', flexShrink: 0 }}>
+        <div className="flex items-center gap-3">
+          <Bell size={20} style={{ color: '#3b82f6' }} />
+          <span className="font-bold tracking-wider" style={{ fontSize: 14, color: '#e2e8f0' }}>ALERT MANAGEMENT</span>
+          <span className="flex items-center justify-center font-bold" style={{ minWidth: 24, height: 22, padding: '0 8px', fontSize: 11, color: '#ef4444', background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 3 }}>
+            {alerts.length}
           </span>
-        )}
-        {criticalCount > 0 && (
-          <span className="px-2 py-0.5 text-[10px] font-semibold text-white" style={{ background: 'rgba(239,68,68,0.3)', border: '1px solid #ef4444', color: '#fca5a5' }}>
-            {criticalCount} critical
-          </span>
-        )}
-        <button className="btn-secondary flex items-center gap-1.5 ml-auto" style={{ height: 30, opacity: unreadCount === 0 ? 0.5 : 1 }} onClick={handleMarkAllRead} disabled={unreadCount === 0}>
-          <CheckCheck size={13} /> Mark All Read
+        </div>
+        <button
+          onClick={handleMarkAllRead}
+          disabled={markingAll || unreadCount === 0}
+          className="btn-secondary flex items-center gap-2"
+          style={{ opacity: markingAll || unreadCount === 0 ? 0.4 : 1, cursor: markingAll ? 'wait' : 'pointer' }}
+        >
+          {markingAll ? <Loader2 size={13} className="animate-spin" /> : <CheckCheck size={13} />}
+          Mark All Read
         </button>
       </div>
 
-      {/* Filter bar */}
-      <div className="flex items-center gap-2 px-4 py-2.5 flex-shrink-0" style={{ borderBottom: '1px solid #1e2d45' }}>
-        <div className="relative flex items-center">
-          <Search size={13} className="absolute left-2.5 text-slate-500" />
+      {/* Filter Bar */}
+      <div className="flex items-center gap-3" style={{ padding: '10px 16px', borderBottom: '1px solid #1e2d45', flexShrink: 0 }}>
+        <div className="relative" style={{ width: 280 }}>
+          <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#64748b' }} />
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search alerts…"
-            style={inputStyle}
+            placeholder="Search alerts..."
+            style={{ ...inputStyle, paddingLeft: 32 }}
+            onFocus={(e) => (e.currentTarget.style.borderColor = '#3b82f6')}
+            onBlur={(e) => (e.currentTarget.style.borderColor = '#1e2d45')}
           />
         </div>
         <div className="flex items-center gap-1">
-          {tabs.map((t) => (
-            <button
-              key={t.key}
-              onClick={() => setFilter(t.key)}
-              className="px-3 py-1 text-[11px] font-semibold tracking-wide transition-all"
-              style={{
-                background: filter === t.key ? 'rgba(59,130,246,0.15)' : 'transparent',
-                border: filter === t.key ? '1px solid #3b82f6' : '1px solid transparent',
-                color: filter === t.key ? '#60a5fa' : '#94a3b8',
-                height: 26,
-              }}
-            >
-              {t.label}
-            </button>
-          ))}
+          {(['all', 'unread', 'warning', 'critical'] as const).map((tab) => {
+            const active = filter === tab;
+            const count = counts[tab] ?? 0;
+            const tabColor = tab === 'critical' ? '#ef4444' : tab === 'warning' ? '#eab308' : tab === 'unread' ? '#3b82f6' : '#60a5fa';
+            return (
+              <button
+                key={tab}
+                onClick={() => setFilter(tab)}
+                style={{
+                  padding: '5px 12px', fontSize: 11, fontWeight: active ? 600 : 500,
+                  cursor: 'pointer', borderRadius: 3, letterSpacing: '0.3px', textTransform: 'uppercase',
+                  background: active ? 'linear-gradient(180deg,#1a3a6e 0%,#0f2547 100%)' : 'transparent',
+                  border: active ? `1px solid ${tabColor}` : '1px solid #1e2d45',
+                  color: active ? tabColor : '#94a3b8',
+                }}
+              >
+                {tab} ({count})
+              </button>
+            );
+          })}
         </div>
       </div>
 
-      {/* Alert list */}
-      <div className="flex-1 overflow-y-auto">
+      {/* Alert List */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
         {filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full gap-2">
-            <Bell size={32} className="text-slate-600" />
-            <span className="text-sm text-slate-500">No alerts to display.</span>
+          <div className="flex flex-col items-center justify-center" style={{ height: '100%', gap: 12 }}>
+            {alerts.length === 0 ? (
+              <>
+                <CheckCircle2 size={48} style={{ color: '#22c55e', opacity: 0.5 }} />
+                <span style={{ fontSize: 13, color: '#64748b' }}>No alerts. System is operating normally.</span>
+              </>
+            ) : (
+              <>
+                <Bell size={48} style={{ color: '#475569', opacity: 0.5 }} />
+                <span style={{ fontSize: 13, color: '#64748b' }}>No alerts match your filters.</span>
+              </>
+            )}
           </div>
         ) : (
-          <div className="flex flex-col">
-            {filtered.map((a, i) => {
-              const cfg = severityConfig[a.severity] ?? severityConfig.info;
-              const resolved = !!a.resolved_at;
+          <div className="flex flex-col gap-2">
+            {filtered.map((alert) => {
+              const cfg = severityConfig[alert.severity];
+              const machine = machineMap[alert.machine_id];
               return (
                 <div
-                  key={a.id}
-                  className="flex items-start gap-3 px-4 py-3"
+                  key={alert.id}
+                  className="panel flex items-start gap-3"
                   style={{
-                    borderBottom: '1px solid #141e30',
-                    background: i % 2 === 0 ? 'transparent' : 'rgba(30,45,69,0.18)',
-                    opacity: resolved ? 0.5 : 1,
+                    padding: '10px 14px',
+                    background: alert.is_read ? '#0e1726' : `linear-gradient(90deg, ${cfg.bg} 0%, #0e1726 60%)`,
+                    borderLeft: `3px solid ${cfg.color}`,
                   }}
                 >
                   {/* Severity icon */}
-                  <div className="flex-shrink-0 mt-0.5 flex items-center justify-center" style={{ width: 28, height: 28, background: `${cfg.color}1a`, border: `1px solid ${cfg.color}40` }}>
-                    <cfg.Icon size={14} style={{ color: cfg.color }} />
-                  </div>
+                  <cfg.icon size={18} style={{ color: cfg.color, marginTop: 1, flexShrink: 0 }} />
 
                   {/* Content */}
-                  <div className="flex flex-col gap-1 min-w-0 flex-1">
+                  <div className="flex flex-col gap-1" style={{ flex: 1, minWidth: 0 }}>
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-[11px] font-semibold tracking-wide" style={{ color: cfg.color }}>
-                        {typeLabels[a.type] ?? a.type}
-                      </span>
-                      <span className="px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-wide" style={{ background: `${cfg.color}1a`, color: cfg.color, border: `1px solid ${cfg.color}30` }}>
-                        {cfg.label}
-                      </span>
-                      {!a.is_read && !resolved && (
-                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: cfg.color }} />
-                      )}
-                      {resolved && (
-                        <span className="flex items-center gap-0.5 text-[9px] text-green-400">
-                          <Check size={10} /> Resolved
+                      <span style={{ fontSize: 11, fontWeight: 700, color: cfg.color, letterSpacing: '0.5px' }}>{cfg.label}</span>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: '#e2e8f0' }}>{typeLabel[alert.type]}</span>
+                      {machine && (
+                        <span className="flex items-center gap-1" style={{ fontSize: 10, color: '#64748b' }}>
+                          · {machine.name}
                         </span>
                       )}
+                      {!alert.is_read && (
+                        <span style={{ fontSize: 8, fontWeight: 700, color: '#3b82f6', padding: '1px 5px', background: 'rgba(59,130,246,0.15)', borderRadius: 2, letterSpacing: '0.5px' }}>NEW</span>
+                      )}
                     </div>
-                    <span className="text-[11px] text-slate-300 leading-snug">{a.message}</span>
-                    <div className="flex items-center gap-3 text-[9px] text-slate-500">
-                      <span className="flex items-center gap-1"><Bell size={9} /> {machineName(a.machine_id)}</span>
-                      <span className="flex items-center gap-1"><Clock size={9} /> {fmtTime(a.created_at)}</span>
-                    </div>
+                    <span style={{ fontSize: 12, color: '#cbd5e1', lineHeight: 1.4 }}>{alert.message}</span>
+                    <span style={{ fontSize: 10, color: '#475569' }}>{formatTimestamp(alert.created_at)}</span>
                   </div>
 
-                  {/* Resolve button */}
-                  {!resolved && (
+                  {/* Actions */}
+                  <div className="flex items-center gap-1.5" style={{ flexShrink: 0 }}>
+                    {!alert.is_read && (
+                      <button
+                        onClick={() => handleMarkRead(alert)}
+                        className="toolbar-icon-btn"
+                        title="Mark as read"
+                        style={{ width: 28, height: 24 }}
+                      >
+                        <Check size={12} />
+                      </button>
+                    )}
                     <button
-                      className="btn-secondary flex items-center gap-1 flex-shrink-0"
-                      style={{ height: 26, padding: '0 10px', fontSize: 10, opacity: resolvingId === a.id ? 0.6 : 1 }}
-                      onClick={() => handleResolve(a)}
-                      disabled={resolvingId === a.id}
+                      onClick={() => handleResolve(alert)}
+                      disabled={resolving === alert.id}
+                      className="btn-secondary flex items-center gap-1"
+                      style={{ padding: '4px 10px', fontSize: 10, opacity: resolving === alert.id ? 0.5 : 1 }}
                     >
-                      <Check size={11} /> Resolve
+                      {resolving === alert.id ? <Loader2 size={11} className="animate-spin" /> : <Wrench size={11} />}
+                      Resolve
                     </button>
-                  )}
+                  </div>
                 </div>
               );
             })}

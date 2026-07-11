@@ -1,10 +1,7 @@
-import {
-  createContext, useContext, useEffect, useState, useRef, ReactNode,
-} from 'react';
+import { createContext, useContext, useEffect, useState, useRef, ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from './AuthContext';
-import { useSimulatedData } from '../hooks/useSimulatedData';
-import { runAIAnalysis } from '../hooks/useSimulatedData';
+import { useSimulatedData, runAIAnalysis } from '../hooks/useSimulatedData';
 import type { Machine, Alert, AIAnalysis, Sensor, Setting } from '../types';
 import type { VibrationPoint, FreqBar, TrendPoint } from '../hooks/useSimulatedData';
 
@@ -14,32 +11,19 @@ export interface LiveReading {
 }
 
 interface MonitoringContextValue {
-  machines: Machine[];
-  selectedMachine: Machine | null;
-  selectMachine: (id: string) => void;
-  monitoring: boolean;
-  setMonitoring: (v: boolean) => void;
-  simulateLoad: boolean;
-  setSimulateLoad: (v: boolean) => void;
-  vibration: VibrationPoint[];
-  freqBars: FreqBar[];
-  currentTrend: TrendPoint[];
-  tempTrend: TrendPoint[];
-  temperature: number; currentVal: number; rmsX: number; rmsY: number; rpm: number;
-  timestamp: string;
-  aiAnalysis: AIAnalysis | null;
-  recentAlerts: Alert[];
-  unreadCount: number;
-  sensors: Sensor[];
-  settings: Setting[];
-  refreshMachines: () => Promise<void>;
-  refreshSensors: () => Promise<void>;
-  refreshSettings: () => Promise<void>;
-  markAlertsRead: () => Promise<void>;
+  machines: Machine[]; selectedMachine: Machine | null; selectMachine: (id: string) => void;
+  monitoring: boolean; setMonitoring: (v: boolean) => void;
+  simulateLoad: boolean; setSimulateLoad: (v: boolean) => void;
+  vibration: VibrationPoint[]; freqBars: FreqBar[];
+  currentTrend: TrendPoint[]; tempTrend: TrendPoint[]; healthTrend: TrendPoint[];
+  temperature: number; currentVal: number; rmsX: number; rmsY: number; rpm: number; timestamp: string;
+  aiAnalysis: AIAnalysis | null; recentAlerts: Alert[]; unreadCount: number;
+  sensors: Sensor[]; settings: Setting[];
+  refreshMachines: () => Promise<void>; refreshSensors: () => Promise<void>;
+  refreshSettings: () => Promise<void>; markAlertsRead: () => Promise<void>;
   persistSnapshot: () => Promise<void>;
   saveSetting: (key: string, value: string, category?: string) => Promise<void>;
-  liveReading: LiveReading | null;
-  pushLiveReading: (reading: LiveReading) => void;
+  liveReading: LiveReading | null; pushLiveReading: (reading: LiveReading) => void;
   dataSource: 'simulated' | 'live';
 }
 
@@ -59,10 +43,8 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
   const liveReadingRef = useRef<LiveReading | null>(null);
   const liveReadingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   liveReadingRef.current = liveReading;
-
   const anomalyLevel = simulateLoad ? 0.75 : 0.35;
   const simData = useSimulatedData(monitoring, anomalyLevel);
-
   const selectedMachine = machines.find((m) => m.id === selectedMachineId) ?? machines[0] ?? null;
   const dataSource: 'simulated' | 'live' = liveReading ? 'live' : 'simulated';
   const displayTemp = liveReading?.temperature ?? simData.temperature;
@@ -70,7 +52,6 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
   const displayRmsY = liveReading?.rmsY ?? simData.rmsY;
   const displayCurrent = liveReading?.current ?? simData.currentVal;
   const displayRpm = liveReading?.rpm ?? simData.rpm;
-
   const aiAnalysis: AIAnalysis | null = selectedMachine
     ? runAIAnalysis({ temperature: displayTemp, rmsX: displayRmsX, rmsY: displayRmsY, current: displayCurrent, rpm: displayRpm }, selectedMachine)
     : null;
@@ -80,7 +61,6 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
     if (liveReadingTimeoutRef.current) clearTimeout(liveReadingTimeoutRef.current);
     liveReadingTimeoutRef.current = setTimeout(() => setLiveReading(null), 10000);
   }
-
   async function refreshMachines() {
     if (!user) return;
     const { data } = await supabase.from('machines').select('*').eq('user_id', user.id).order('created_at');
@@ -113,38 +93,29 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
     else await supabase.from('settings').insert({ user_id: user.id, key, value, category });
     refreshSettings();
   }
-
   const persistTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastAlertRef = useRef<number>(0);
-
   async function persistSnapshot() {
     if (!user || !selectedMachine) return;
     await supabase.from('sensor_snapshots').insert({
       machine_id: selectedMachine.id, user_id: user.id,
       temperature: displayTemp, vibration_rms: +((displayRmsX + displayRmsY) / 2).toFixed(3),
-      current: displayCurrent, rpm: displayRpm,
-      voltage: liveReading?.voltage ?? 220 + (Math.random() - 0.5) * 5,
+      current: displayCurrent, rpm: displayRpm, voltage: liveReading?.voltage ?? 220 + (Math.random() - 0.5) * 5,
     });
     const sensorReadings: Record<string, number> = {
       vibration: +((displayRmsX + displayRmsY) / 2).toFixed(3), temperature: displayTemp,
-      current: displayCurrent, rpm: displayRpm,
-      voltage: liveReading?.voltage ?? 220 + (Math.random() - 0.5) * 5,
+      current: displayCurrent, rpm: displayRpm, voltage: liveReading?.voltage ?? 220 + (Math.random() - 0.5) * 5,
     };
     const machineSensors = sensors.filter(s => s.machine_id === selectedMachine.id);
     if (machineSensors.length > 0) {
-      const records = machineSensors.map(s => ({
-        sensor_id: s.id, machine_id: selectedMachine.id, user_id: user.id,
-        value: sensorReadings[s.type] ?? 0, unit: s.unit, quality: 'good',
-      }));
+      const records = machineSensors.map(s => ({ sensor_id: s.id, machine_id: selectedMachine.id, user_id: user.id, value: sensorReadings[s.type] ?? 0, unit: s.unit, quality: 'good' }));
       await supabase.from('sensor_data').insert(records);
     }
     await supabase.from('machine_health').upsert({
-      machine_id: selectedMachine.id, user_id: user.id,
-      rms_x: displayRmsX, rms_y: displayRmsY, temperature: displayTemp,
-      current: displayCurrent, rpm: displayRpm,
-      voltage: liveReading?.voltage ?? 220,
-      health_score: aiAnalysis?.healthScore ?? 100, status: aiAnalysis?.status ?? 'healthy',
-      updated_at: new Date().toISOString(),
+      machine_id: selectedMachine.id, user_id: user.id, rms_x: displayRmsX, rms_y: displayRmsY,
+      temperature: displayTemp, current: displayCurrent, rpm: displayRpm,
+      voltage: liveReading?.voltage ?? 220, health_score: aiAnalysis?.healthScore ?? 100,
+      status: aiAnalysis?.status ?? 'healthy', updated_at: new Date().toISOString(),
     });
     if (aiAnalysis && aiAnalysis.status !== 'healthy' && Date.now() - lastAlertRef.current > 30000) {
       lastAlertRef.current = Date.now();
@@ -157,20 +128,14 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
       refreshAlerts();
     }
   }
-
-  useEffect(() => {
-    if (user) { refreshMachines(); refreshSensors(); refreshSettings(); refreshAlerts(); }
-  }, [user]);
-
+  useEffect(() => { if (user) { refreshMachines(); refreshSensors(); refreshSettings(); refreshAlerts(); } }, [user]);
   useEffect(() => {
     if (monitoring && selectedMachine) {
       persistTimerRef.current = setInterval(persistSnapshot, 5000);
       return () => { if (persistTimerRef.current) clearInterval(persistTimerRef.current); };
     }
   }, [monitoring, selectedMachine, displayTemp, displayCurrent, displayRpm, aiAnalysis]);
-
   function selectMachine(id: string) { setSelectedMachineId(id); }
-
   return (
     <MonitoringContext.Provider value={{
       machines, selectedMachine, selectMachine, monitoring, setMonitoring,
@@ -184,7 +149,6 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
     </MonitoringContext.Provider>
   );
 }
-
 export function useMonitoring() {
   const ctx = useContext(MonitoringContext);
   if (!ctx) throw new Error('useMonitoring must be used within MonitoringProvider');

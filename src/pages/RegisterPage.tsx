@@ -1,195 +1,319 @@
-import { useState, FormEvent } from 'react';
-import { Loader2, UserPlus, Lock, Mail, ArrowLeft, Activity } from 'lucide-react';
+import { useState, type FormEvent } from 'react';
+import { Loader2, Lock, Mail, User, AlertCircle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
-interface Props {
+interface RegisterPageProps {
   onNavigateLogin: () => void;
 }
 
+const inputStyle: React.CSSProperties = {
+  width: '100%',
+  background: '#0a1220',
+  border: '1px solid #1e2d45',
+  color: '#e2e8f0',
+  fontSize: 13,
+  padding: '10px 12px 10px 36px',
+  outline: 'none',
+  transition: 'border-color 0.15s',
+};
+
 /**
- * Registration screen. Renders the VELTRIX brand, an email/password sign-up
- * form wired to `useAuth().signUp`, and a link back to the login page.
- * Mirrors the LoginPage dark SCADA styling.
+ * RegisterPage — VELTRIX SCADA registration screen.
+ * Dark-themed register card with logo, email/password fields, and link to login.
  */
-export function RegisterPage({ onNavigateLogin }: Props) {
+export function RegisterPage({ onNavigateLogin }: RegisterPageProps) {
   const { signUp } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [confirm, setConfirm] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
+  const [success, setSuccess] = useState(false);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!email.trim() || !password) {
-      setError('Email and password are required');
+      setError('Please enter your email and password.');
       return;
     }
     if (password.length < 6) {
-      setError('Password must be at least 6 characters');
+      setError('Password must be at least 6 characters.');
       return;
     }
-    if (password !== confirm) {
-      setError('Passwords do not match');
+    if (password !== confirmPassword) {
+      setError('Passwords do not match.');
       return;
     }
-    setSubmitting(true);
+    setLoading(true);
     setError(null);
     const { error: signUpError } = await signUp(email.trim(), password);
-    setSubmitting(false);
+    setLoading(false);
     if (signUpError) {
       setError(signUpError);
-      return;
+    } else {
+      setSuccess(true);
     }
-    setDone(true);
   }
 
-  const inputStyle: React.CSSProperties = {
-    width: '100%',
-    background: '#060b14',
-    border: '1px solid #1e2d45',
-    color: '#e2e8f0',
-    fontSize: 13,
-    padding: '10px 12px 10px 34px',
-    outline: 'none',
-    transition: 'border-color 0.15s',
-  };
+  if (success) {
+    return (
+      <div
+        className="flex items-center justify-center"
+        style={{
+          minHeight: '100vh',
+          width: '100vw',
+          background: '#060b14',
+          padding: 20,
+        }}
+      >
+        <div
+          className="flex flex-col items-center"
+          style={{
+            width: '100%',
+            maxWidth: 400,
+            background: '#0e1726',
+            border: '1px solid #1e2d45',
+            borderRadius: 8,
+            padding: '40px 36px',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.6)',
+            textAlign: 'center',
+          }}
+        >
+          <img
+            src="/assets/veltrix-logo.svg"
+            alt="VELTRIX"
+            width={64}
+            height={58}
+            style={{ display: 'block', marginBottom: 16 }}
+          />
+          <h1
+            className="font-bold"
+            style={{ fontSize: 18, color: '#4ade80', margin: 0 }}
+          >
+            Registration Successful
+          </h1>
+          <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 12, lineHeight: 1.6 }}>
+            Your VELTRIX SCADA account has been created. Please check your email
+            for confirmation, then sign in to continue.
+          </p>
+          <button
+            onClick={onNavigateLogin}
+            className="btn-monitor w-full"
+            style={{ marginTop: 24, padding: '10px 16px' }}
+          >
+            Go to Login
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
       className="flex items-center justify-center"
       style={{
         minHeight: '100vh',
+        width: '100vw',
         background: '#060b14',
-        backgroundImage:
-          'radial-gradient(circle at 20% 20%, rgba(59,130,246,0.08) 0%, transparent 40%), radial-gradient(circle at 80% 80%, rgba(6,182,212,0.06) 0%, transparent 40%)',
+        padding: 20,
       }}
     >
       <div
-        className="flex flex-col"
+        className="flex flex-col items-center"
         style={{
-          width: 380,
-          maxWidth: '92vw',
+          width: '100%',
+          maxWidth: 400,
           background: '#0e1726',
           border: '1px solid #1e2d45',
-          boxShadow: '0 0 50px rgba(0,0,0,0.7)',
+          borderRadius: 8,
+          padding: '40px 36px',
+          boxShadow: '0 20px 60px rgba(0,0,0,0.6)',
         }}
       >
-        {/* Brand header */}
-        <div
-          className="flex flex-col items-center gap-2 px-6 pt-8 pb-5"
-          style={{ borderBottom: '1px solid #1e2d45', background: 'linear-gradient(180deg,#151f33 0%,#0e1726 100%)' }}
+        {/* Logo */}
+        <img
+          src="/assets/veltrix-logo.svg"
+          alt="VELTRIX"
+          width={64}
+          height={58}
+          style={{ display: 'block', marginBottom: 16 }}
+        />
+
+        {/* Title */}
+        <h1
+          className="font-bold tracking-wide"
+          style={{ fontSize: 22, color: '#e2e8f0', margin: 0 }}
         >
-          <img src="/assets/veltrix-logo.svg" alt="VELTRIX" width={64} height={58} />
-          <div className="flex flex-col items-center">
-            <span className="text-xl font-bold text-slate-100 tracking-[3px]">VELTRIX</span>
-            <span className="text-[9px] text-slate-500 tracking-[4px]">CREATE ACCOUNT</span>
+          Create Account
+        </h1>
+        <p
+          className="text-center"
+          style={{
+            fontSize: 10,
+            color: '#3b82f6',
+            letterSpacing: '3px',
+            fontWeight: 600,
+            margin: '4px 0 28px',
+          }}
+        >
+          VELTRIX PREDICTIVE MAINTENANCE
+        </p>
+
+        {/* Error */}
+        {error && (
+          <div
+            className="flex items-center gap-2 w-full"
+            style={{
+              padding: '8px 12px',
+              marginBottom: 16,
+              background: 'rgba(239,68,68,0.08)',
+              border: '1px solid rgba(239,68,68,0.3)',
+              borderRadius: 4,
+            }}
+          >
+            <AlertCircle size={14} style={{ color: '#ef4444', flexShrink: 0 }} />
+            <span style={{ fontSize: 12, color: '#f87171' }}>{error}</span>
           </div>
-        </div>
+        )}
 
-        {/* Form / success */}
-        <div className="p-6 flex flex-col gap-4">
-          {done ? (
-            <div className="flex flex-col items-center gap-3 py-4">
-              <div
-                className="flex items-center justify-center"
-                style={{ width: 48, height: 48, background: 'rgba(34,197,94,0.12)', border: '1px solid rgba(34,197,94,0.4)' }}
-              >
-                <Activity size={22} className="text-green-400" />
-              </div>
-              <span className="text-xs text-slate-200 text-center">
-                Registration successful.<br />
-                <span className="text-slate-400">Check your email to confirm your account, then sign in.</span>
-              </span>
-              <button className="btn-monitor flex items-center gap-2" onClick={onNavigateLogin} style={{ height: 34 }}>
-                <ArrowLeft size={13} /> Back to Login
-              </button>
+        {/* Form */}
+        <form onSubmit={handleSubmit} className="flex flex-col gap-4 w-full">
+          {/* Email */}
+          <div className="flex flex-col gap-1.5">
+            <label
+              className="text-[10px] font-semibold tracking-wider"
+              style={{ color: '#94a3b8' }}
+            >
+              EMAIL
+            </label>
+            <div className="relative">
+              <User
+                size={15}
+                style={{
+                  position: 'absolute',
+                  left: 11,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  color: '#64748b',
+                }}
+              />
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="operator@veltrix.io"
+                autoFocus
+                style={inputStyle}
+                onFocus={(e) => (e.currentTarget.style.borderColor = '#3b82f6')}
+                onBlur={(e) => (e.currentTarget.style.borderColor = '#1e2d45')}
+              />
             </div>
-          ) : (
-            <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-              <div className="flex items-center gap-2">
-                <UserPlus size={14} className="text-blue-400" />
-                <span className="text-xs font-semibold text-slate-200 tracking-wide">REGISTER</span>
-              </div>
+          </div>
 
-              <div className="flex flex-col gap-1.5 relative">
-                <label className="text-[10px] text-slate-400 tracking-wide">EMAIL</label>
-                <div className="relative">
-                  <Mail size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="you@example.com"
-                    style={inputStyle}
-                    autoFocus
-                    autoComplete="email"
-                  />
-                </div>
-              </div>
+          {/* Password */}
+          <div className="flex flex-col gap-1.5">
+            <label
+              className="text-[10px] font-semibold tracking-wider"
+              style={{ color: '#94a3b8' }}
+            >
+              PASSWORD
+            </label>
+            <div className="relative">
+              <Lock
+                size={15}
+                style={{
+                  position: 'absolute',
+                  left: 11,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  color: '#64748b',
+                }}
+              />
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="At least 6 characters"
+                style={inputStyle}
+                onFocus={(e) => (e.currentTarget.style.borderColor = '#3b82f6')}
+                onBlur={(e) => (e.currentTarget.style.borderColor = '#1e2d45')}
+              />
+            </div>
+          </div>
 
-              <div className="flex flex-col gap-1.5 relative">
-                <label className="text-[10px] text-slate-400 tracking-wide">PASSWORD</label>
-                <div className="relative">
-                  <Lock size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="At least 6 characters"
-                    style={inputStyle}
-                    autoComplete="new-password"
-                  />
-                </div>
-              </div>
+          {/* Confirm Password */}
+          <div className="flex flex-col gap-1.5">
+            <label
+              className="text-[10px] font-semibold tracking-wider"
+              style={{ color: '#94a3b8' }}
+            >
+              CONFIRM PASSWORD
+            </label>
+            <div className="relative">
+              <Lock
+                size={15}
+                style={{
+                  position: 'absolute',
+                  left: 11,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  color: '#64748b',
+                }}
+              />
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="••••••••"
+                style={inputStyle}
+                onFocus={(e) => (e.currentTarget.style.borderColor = '#3b82f6')}
+                onBlur={(e) => (e.currentTarget.style.borderColor = '#1e2d45')}
+              />
+            </div>
+          </div>
 
-              <div className="flex flex-col gap-1.5 relative">
-                <label className="text-[10px] text-slate-400 tracking-wide">CONFIRM PASSWORD</label>
-                <div className="relative">
-                  <Lock size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
-                  <input
-                    type="password"
-                    value={confirm}
-                    onChange={(e) => setConfirm(e.target.value)}
-                    placeholder="Re-enter password"
-                    style={inputStyle}
-                    autoComplete="new-password"
-                  />
-                </div>
-              </div>
+          {/* Submit */}
+          <button
+            type="submit"
+            disabled={loading}
+            className="btn-monitor flex items-center justify-center gap-2 w-full"
+            style={{
+              marginTop: 8,
+              padding: '10px 16px',
+              opacity: loading ? 0.6 : 1,
+              cursor: loading ? 'wait' : 'pointer',
+            }}
+          >
+            {loading ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <Mail size={15} />
+            )}
+            <span>{loading ? 'Creating account...' : 'Create Account'}</span>
+          </button>
+        </form>
 
-              {error && (
-                <div
-                  className="px-3 py-2 text-[11px] text-red-400"
-                  style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)' }}
-                >
-                  {error}
-                </div>
-              )}
-
-              <button
-                type="submit"
-                className="btn-monitor flex items-center justify-center gap-2"
-                disabled={submitting}
-                style={{ opacity: submitting ? 0.7 : 1, height: 38, marginTop: 4 }}
-              >
-                {submitting ? <Loader2 size={14} className="animate-spin" /> : <UserPlus size={14} />}
-                {submitting ? 'Creating account…' : 'Create Account'}
-              </button>
-
-              <div className="flex items-center justify-center gap-1.5 pt-1">
-                <span className="text-[11px] text-slate-500">Already registered?</span>
-                <button
-                  type="button"
-                  onClick={onNavigateLogin}
-                  className="flex items-center gap-1 text-[11px] font-semibold text-blue-400 hover:text-blue-300 transition-colors"
-                >
-                  <ArrowLeft size={11} /> Sign In
-                </button>
-              </div>
-            </form>
-          )}
+        {/* Login link */}
+        <div className="flex items-center gap-1.5" style={{ marginTop: 28 }}>
+          <span style={{ fontSize: 12, color: '#64748b' }}>
+            Already have an account?
+          </span>
+          <button
+            onClick={onNavigateLogin}
+            style={{
+              fontSize: 12,
+              color: '#60a5fa',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              fontWeight: 600,
+              padding: 0,
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = '#93c5fd')}
+            onMouseLeave={(e) => (e.currentTarget.style.color = '#60a5fa')}
+          >
+            Sign In
+          </button>
         </div>
       </div>
     </div>

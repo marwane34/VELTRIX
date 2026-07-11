@@ -1,77 +1,91 @@
-import { useEffect, useRef, useState } from 'react';
+import { useMemo } from 'react';
 
-interface FreqPoint {
-  freq: number;
-  amp: number;
+interface FrequencyChartProps {
+  data: { freq: number; amp: number }[];
 }
 
-interface Props {
-  data: FreqPoint[];
-}
+const WIDTH = 100;
+const HEIGHT = 160;
+const PADDING = { top: 16, right: 8, bottom: 20, left: 32 };
+const PLOT_W = WIDTH - PADDING.left - PADDING.right;
+const PLOT_H = HEIGHT - PADDING.top - PADDING.bottom;
 
 /**
- * SVG bar chart for the frequency spectrum. Blue bars scaled to the peak
- * amplitude, with frequency labels along the X axis on a dark canvas.
+ * FrequencyChart — SVG bar chart of the frequency spectrum.
+ * Renders blue bars on a dark background. Title "FREQUENCY SPECTRUM".
  */
-export default function FrequencyChart({ data }: Props) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(600);
-  const height = 160;
+export default function FrequencyChart({ data }: FrequencyChartProps) {
+  const { bars, gridY, yLabels, maxAmp } = useMemo(() => {
+    const slice = data.slice(-40);
+    let maxAmp = 0.5;
+    for (const b of slice) if (b.amp > maxAmp) maxAmp = b.amp;
+    maxAmp = Math.max(0.5, maxAmp * 1.1);
 
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver((entries) => {
-      for (const e of entries) setWidth(e.contentRect.width);
+    const n = Math.max(1, slice.length);
+    const barGap = PLOT_W / n;
+    const barW = Math.max(0.8, barGap * 0.7);
+    const vToPy = (v: number) => PADDING.top + (1 - v / maxAmp) * PLOT_H;
+
+    const bars = slice.map((b, i) => {
+      const x = PADDING.left + i * barGap + (barGap - barW) / 2;
+      const y = vToPy(b.amp);
+      const h = PADDING.top + PLOT_H - y;
+      return { x, y, h, w: barW, freq: b.freq, amp: b.amp };
     });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
 
-  const bars = data;
-  const maxAmp = bars.length ? Math.max(...bars.map((b) => b.amp), 0.001) : 1;
-  const padTop = 8;
-  const padBottom = 20; // room for frequency labels
-  const plotH = height - padTop - padBottom;
-  const barW = bars.length ? width / bars.length : width;
-  const gap = Math.max(1, barW * 0.12);
+    const gridY: number[] = [];
+    const yLabels: { y: number; label: string }[] = [];
+    const steps = 4;
+    for (let s = 0; s <= steps; s++) {
+      const py = PADDING.top + (s / steps) * PLOT_H;
+      gridY.push(py);
+      const val = maxAmp - (s / steps) * maxAmp;
+      yLabels.push({ y: py, label: val.toFixed(2) });
+    }
 
-  // Label roughly every Nth bar to avoid crowding.
-  const labelStep = Math.max(1, Math.ceil(bars.length / 8));
+    return { bars, gridY, yLabels, maxAmp };
+  }, [data]);
 
   return (
-    <div className="panel">
-      <div className="flex items-center justify-between px-3 py-2" style={{ borderBottom: '1px solid #1e2d45' }}>
-        <span className="text-xs font-semibold text-slate-200 tracking-wide">FREQUENCY SPECTRUM</span>
-        <span className="text-[10px] text-slate-500">Hz</span>
+    <div className="panel chart-bg" style={{ height: HEIGHT, padding: 0, overflow: 'hidden', borderRadius: 0 }}>
+      <div className="flex items-center justify-between px-3" style={{ height: 22, borderBottom: '1px solid #1a2540', flexShrink: 0 }}>
+        <span className="text-[10px] font-semibold tracking-wider" style={{ color: '#94a3b8' }}>FREQUENCY SPECTRUM</span>
+        <span className="text-[9px]" style={{ color: '#64748b' }}>max {maxAmp.toFixed(2)}</span>
       </div>
-      <div ref={containerRef} className="chart-bg" style={{ height }}>
-        <svg width={width} height={height} className="block">
-          {[0.25, 0.5, 0.75].map((f, i) => (
-            <line key={`hg${i}`} x1={0} y1={padTop + plotH * f} x2={width} y2={padTop + plotH * f} className="chart-grid-line" />
-          ))}
-          {bars.map((b, i) => {
-            const h = (b.amp / maxAmp) * plotH;
-            const x = i * barW + gap / 2;
-            const y = padTop + plotH - h;
-            const w = Math.max(1, barW - gap);
-            return <rect key={i} x={x} y={y} width={w} height={Math.max(0, h)} fill="#3b82f6" rx={1} />;
-          })}
-          {bars.map((b, i) =>
-            i % labelStep === 0 ? (
-              <text
-                key={`l${i}`}
-                x={i * barW + barW / 2}
-                y={height - 6}
-                textAnchor="middle"
-                style={{ fontSize: 9, fill: '#64748b', fontFamily: 'inherit' }}
-              >
-                {b.freq}
-              </text>
-            ) : null
-          )}
-        </svg>
-      </div>
+      <svg width="100%" height={HEIGHT - 22} viewBox={`0 0 ${WIDTH} ${HEIGHT - 22}`} preserveAspectRatio="none" style={{ display: 'block' }}>
+        <defs>
+          <linearGradient id="freqBarGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#60a5fa" />
+            <stop offset="100%" stopColor="#1d4ed8" />
+          </linearGradient>
+        </defs>
+
+        {/* Horizontal grid lines */}
+        {gridY.map((gy, i) => (
+          <line key={`h-${i}`} x1={PADDING.left} y1={gy} x2={WIDTH - PADDING.right} y2={gy}
+            className="chart-grid-line" />
+        ))}
+
+        {/* Y-axis labels */}
+        {yLabels.map((yl, i) => (
+          <text key={`yl-${i}`} x={PADDING.left - 4} y={yl.y + 2} textAnchor="end"
+            fontSize="6" fill="#64748b" fontFamily="monospace">{yl.label}</text>
+        ))}
+
+        {/* Y-axis line */}
+        <line x1={PADDING.left} y1={PADDING.top} x2={PADDING.left} y2={PADDING.top + PLOT_H}
+          stroke="#1e2d45" strokeWidth="0.8" />
+
+        {/* Bars */}
+        {bars.map((b, i) => (
+          <rect key={`bar-${i}`} x={b.x} y={b.y} width={b.w} height={Math.max(0.5, b.h)}
+            fill="url(#freqBarGrad)" rx="0.4" />
+        ))}
+
+        {/* X-axis baseline */}
+        <line x1={PADDING.left} y1={PADDING.top + PLOT_H} x2={WIDTH - PADDING.right} y2={PADDING.top + PLOT_H}
+          stroke="#1e2d45" strokeWidth="0.8" />
+      </svg>
     </div>
   );
 }

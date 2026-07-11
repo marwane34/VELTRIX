@@ -10,6 +10,7 @@ import MachinesPage from './pages/MachinesPage';
 import AlertsPage from './pages/AlertsPage';
 import AnalyticsPage from './pages/AnalyticsPage';
 import CommunicationPage from './pages/CommunicationPage';
+import ExportHistoryPage from './pages/ExportHistoryPage';
 import { AppLayout, NavItem } from './components/AppLayout';
 
 type AuthPage = 'login' | 'register';
@@ -44,10 +45,11 @@ function AppContent() {
             <Dashboard onNavigate={(p) => setAppPage(p as NavItem)} />
           ) : (
             <AppLayout activeNav={appPage} onNavigate={setAppPage} onOpenNotifications={() => setShowNotifications(true)}>
-              {appPage === 'machines' && <MachinesPage />}
-              {appPage === 'alerts' && <AlertsPage />}
-              {appPage === 'analytics' && <AnalyticsPage />}
-              {appPage === 'communication' && <CommunicationPage />}
+              {appPage === 'machines' && <MachinesPage onNavigate={(p) => setAppPage(p as NavItem)} />}
+              {appPage === 'alerts' && <AlertsPage onNavigate={(p) => setAppPage(p as NavItem)} />}
+              {appPage === 'analytics' && <AnalyticsPage onNavigate={(p) => setAppPage(p as NavItem)} />}
+              {appPage === 'communication' && <CommunicationPage onNavigate={(p) => setAppPage(p as NavItem)} />}
+              {appPage === 'export_history' && <ExportHistoryPage onNavigate={(p) => setAppPage(p as NavItem)} />}
             </AppLayout>
           )}
         </ToastProvider>

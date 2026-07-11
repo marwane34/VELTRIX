@@ -1,81 +1,97 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useMemo } from 'react';
 
-interface TrendPoint {
-  t: number;
-  v: number;
+interface CurrentChartProps {
+  data: { t: number; v: number }[];
 }
 
-interface Props {
-  data: TrendPoint[];
-}
+const WIDTH = 100;
+const HEIGHT = 160;
+const PADDING = { top: 16, right: 8, bottom: 18, left: 32 };
+const PLOT_W = WIDTH - PADDING.left - PADDING.right;
+const PLOT_H = HEIGHT - PADDING.top - PADDING.bottom;
 
 /**
- * SVG line chart for the motor current trend. Yellow line with a translucent
- * gradient area fill, auto-scaled to the visible data on a dark canvas.
+ * CurrentChart — SVG line chart with yellow line and gradient area fill.
+ * Title "CURRENT TREND". Dark background.
  */
-export default function CurrentChart({ data }: Props) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(600);
-  const height = 160;
-  const gradId = useId();
+export default function CurrentChart({ data }: CurrentChartProps) {
+  const { linePath, areaPath, gridY, yLabels, latest } = useMemo(() => {
+    const slice = data.slice(-60);
+    if (slice.length === 0) {
+      return { linePath: '', areaPath: '', gridY: [], yLabels: [], latest: null as number | null };
+    }
 
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver((entries) => {
-      for (const e of entries) setWidth(e.contentRect.width);
+    let minV = Infinity;
+    let maxV = -Infinity;
+    for (const p of slice) {
+      if (p.v < minV) minV = p.v;
+      if (p.v > maxV) maxV = p.v;
+    }
+    const range = maxV - minV || 1;
+    minV = minV - range * 0.1;
+    maxV = maxV + range * 0.1;
+
+    const n = Math.max(1, slice.length - 1);
+    const xToPx = (i: number) => PADDING.left + (i / n) * PLOT_W;
+    const vToPy = (v: number) => PADDING.top + (1 - (v - minV) / (maxV - minV)) * PLOT_H;
+
+    let linePath = '';
+    slice.forEach((p, i) => {
+      const cmd = i === 0 ? 'M' : 'L';
+      linePath += `${cmd}${xToPx(i).toFixed(2)},${vToPy(p.v).toFixed(2)} `;
     });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
 
-  const pts = data.slice(-200);
-  const padTop = 10;
-  const padBottom = 10;
-  const plotH = height - padTop - padBottom;
+    const baseY = PADDING.top + PLOT_H;
+    const areaPath = `${linePath} L${xToPx(slice.length - 1).toFixed(2)},${baseY} L${xToPx(0).toFixed(2)},${baseY} Z`;
 
-  let minV = pts.length ? Math.min(...pts.map((p) => p.v)) : 0;
-  let maxV = pts.length ? Math.max(...pts.map((p) => p.v)) : 1;
-  if (minV === maxV) {
-    minV -= 1;
-    maxV += 1;
-  }
-  const padV = (maxV - minV) * 0.1;
-  minV -= padV;
-  maxV += padV;
-  const range = maxV - minV || 1;
+    const gridY: number[] = [];
+    const yLabels: { y: number; label: string }[] = [];
+    const steps = 4;
+    for (let s = 0; s <= steps; s++) {
+      const py = PADDING.top + (s / steps) * PLOT_H;
+      gridY.push(py);
+      const val = maxV - (s / steps) * (maxV - minV);
+      yLabels.push({ y: py, label: val.toFixed(1) });
+    }
 
-  const mapY = (v: number) => padTop + plotH - ((v - minV) / range) * plotH;
-  const mapX = (i: number) => (pts.length > 1 ? (i / (pts.length - 1)) * width : 0);
-
-  const linePath = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${mapX(i).toFixed(2)} ${mapY(p.v).toFixed(2)}`).join(' ');
-  const baseY = padTop + plotH;
-  const areaPath =
-    pts.length > 1
-      ? `${linePath} L ${mapX(pts.length - 1).toFixed(2)} ${baseY} L ${mapX(0).toFixed(2)} ${baseY} Z`
-      : '';
+    return { linePath, areaPath, gridY, yLabels, latest: slice[slice.length - 1].v };
+  }, [data]);
 
   return (
-    <div className="panel">
-      <div className="flex items-center justify-between px-3 py-2" style={{ borderBottom: '1px solid #1e2d45' }}>
-        <span className="text-xs font-semibold text-slate-200 tracking-wide">CURRENT TREND</span>
-        <span className="text-[10px] text-slate-500">A</span>
+    <div className="panel chart-bg" style={{ height: HEIGHT, padding: 0, overflow: 'hidden', borderRadius: 0 }}>
+      <div className="flex items-center justify-between px-3" style={{ height: 22, borderBottom: '1px solid #1a2540', flexShrink: 0 }}>
+        <span className="text-[10px] font-semibold tracking-wider" style={{ color: '#94a3b8' }}>CURRENT TREND</span>
+        <span className="text-[9px] val-yellow font-semibold">{latest != null ? `${latest.toFixed(2)}A` : '—'}</span>
       </div>
-      <div ref={containerRef} className="chart-bg" style={{ height }}>
-        <svg width={width} height={height} className="block">
-          <defs>
-            <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#eab308" stopOpacity={0.45} />
-              <stop offset="100%" stopColor="#eab308" stopOpacity={0} />
-            </linearGradient>
-          </defs>
-          {[0.25, 0.5, 0.75].map((f, i) => (
-            <line key={`h${i}`} x1={0} y1={padTop + plotH * f} x2={width} y2={padTop + plotH * f} className="chart-grid-line" />
-          ))}
-          {areaPath && <path d={areaPath} fill={`url(#${gradId})`} />}
-          <path d={linePath} fill="none" stroke="#eab308" strokeWidth={1.5} strokeLinejoin="round" />
-        </svg>
-      </div>
+      <svg width="100%" height={HEIGHT - 22} viewBox={`0 0 ${WIDTH} ${HEIGHT - 22}`} preserveAspectRatio="none" style={{ display: 'block' }}>
+        <defs>
+          <linearGradient id="currAreaGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#eab308" stopOpacity="0.4" />
+            <stop offset="100%" stopColor="#eab308" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+
+        {/* Horizontal grid lines */}
+        {gridY.map((gy, i) => (
+          <line key={`h-${i}`} x1={PADDING.left} y1={gy} x2={WIDTH - PADDING.right} y2={gy}
+            className="chart-grid-line" />
+        ))}
+
+        {/* Y-axis labels */}
+        {yLabels.map((yl, i) => (
+          <text key={`yl-${i}`} x={PADDING.left - 4} y={yl.y + 2} textAnchor="end"
+            fontSize="6" fill="#64748b" fontFamily="monospace">{yl.label}</text>
+        ))}
+
+        {/* Y-axis line */}
+        <line x1={PADDING.left} y1={PADDING.top} x2={PADDING.left} y2={PADDING.top + PLOT_H}
+          stroke="#1e2d45" strokeWidth="0.8" />
+
+        {/* Area fill */}
+        {areaPath && <path d={areaPath} fill="url(#currAreaGrad)" stroke="none" />}
+        {/* Line */}
+        {linePath && <path d={linePath} fill="none" stroke="#eab308" strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round" />}
+      </svg>
     </div>
   );
 }

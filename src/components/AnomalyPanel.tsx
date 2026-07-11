@@ -1,151 +1,136 @@
-import { Activity, AlertTriangle, ShieldCheck, Wrench, Gauge, Flame, Zap, Clock, Lightbulb } from 'lucide-react';
+import { Activity, ShieldCheck, AlertTriangle, AlertOctagon, Thermometer, Wrench, Cpu } from 'lucide-react';
 import { useMonitoring } from '../contexts/MonitoringContext';
-import type { HealthStatus } from '../types';
 
-const statusConfig: Record<HealthStatus, { label: string; color: string; bg: string; Icon: typeof ShieldCheck }> = {
-  healthy: { label: 'HEALTHY', color: '#4ade80', bg: 'rgba(34,197,94,0.12)', Icon: ShieldCheck },
-  warning: { label: 'WARNING', color: '#facc15', bg: 'rgba(234,179,8,0.12)', Icon: AlertTriangle },
-  critical: { label: 'CRITICAL', color: '#f87171', bg: 'rgba(239,68,68,0.12)', Icon: AlertTriangle },
-};
+const RADIUS = 34;
+const STROKE = 7;
+const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
-function scoreColor(score: number) {
-  if (score > 70) return '#22c55e';
-  if (score >= 40) return '#eab308';
-  return '#ef4444';
+/** Circular gauge rendering the health score (green >70, yellow 40-70, red <40). */
+function HealthGauge({ score }: { score: number }) {
+  const clamped = Math.max(0, Math.min(100, score));
+  const color = score > 70 ? '#22c55e' : score > 40 ? '#eab308' : '#ef4444';
+  const offset = CIRCUMFERENCE - (clamped / 100) * CIRCUMFERENCE;
+  const size = (RADIUS + STROKE) * 2 + 4;
+  const center = size / 2;
+
+  return (
+    <div className="relative flex items-center justify-center" style={{ width: size, height: size }}>
+      <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
+        <circle cx={center} cy={center} r={RADIUS} fill="none" stroke="#1a2540" strokeWidth={STROKE} />
+        <circle cx={center} cy={center} r={RADIUS} fill="none" stroke={color} strokeWidth={STROKE}
+          strokeDasharray={CIRCUMFERENCE} strokeDashoffset={offset} strokeLinecap="round"
+          style={{ transition: 'stroke-dashoffset 0.5s ease, stroke 0.3s ease' }} />
+      </svg>
+      <div className="absolute flex flex-col items-center">
+        <span className="font-bold leading-none" style={{ fontSize: 22, color }}>{Math.round(clamped)}</span>
+        <span className="text-[8px] tracking-wider" style={{ color: '#64748b', marginTop: 2 }}>SCORE</span>
+      </div>
+    </div>
+  );
+}
+
+function StatPill({ label, value, icon: Icon, color }: { label: string; value: number | string; icon: typeof Activity; color: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center px-2 py-2" style={{ background: '#0a1220', border: '1px solid #1a2540', flex: 1, minWidth: 0 }}>
+      <Icon size={12} style={{ color, marginBottom: 4 }} />
+      <span className="font-bold leading-none" style={{ fontSize: 13, color }}>{value}</span>
+      <span className="text-[8px] tracking-wider text-center truncate w-full" style={{ color: '#64748b', marginTop: 3 }}>{label}</span>
+    </div>
+  );
 }
 
 /**
- * AI health analysis panel: circular health-score gauge, status badge,
- * bearing/overheat/failure risk metric cards, RUL, anomalies list and a
- * recommendation block. Reads `aiAnalysis` from the monitoring context.
+ * AnomalyPanel — AI health analysis panel.
+ * Shows circular gauge, status badge, bearing wear %, overheat risk %,
+ * failure risk %, RUL hours, anomalies list, and recommendation.
  */
 export default function AnomalyPanel() {
   const { aiAnalysis } = useMonitoring();
 
-  if (!aiAnalysis) {
-    return (
-      <div className="panel flex flex-col items-center justify-center" style={{ height: '100%' }}>
-        <Activity size={28} className="text-slate-600 mb-2" />
-        <span className="text-xs text-slate-500">Select a machine to view AI analysis</span>
-      </div>
-    );
-  }
-
-  const { healthScore, status, bearingWear, overheatRisk, failureRisk, rulHours, anomalies, recommendation } = aiAnalysis;
-  const sc = statusConfig[status];
-  const ringColor = scoreColor(healthScore);
-
-  // Circular gauge geometry
-  const size = 96;
-  const stroke = 8;
-  const r = (size - stroke) / 2;
-  const c = 2 * Math.PI * r;
-  const offset = c - (healthScore / 100) * c;
-
-  const metrics = [
-    { label: 'Bearing Wear', value: bearingWear, unit: '%', Icon: Wrench, color: bearingWear > 60 ? '#f87171' : bearingWear > 40 ? '#facc15' : '#4ade80' },
-    { label: 'Overheat Risk', value: overheatRisk, unit: '%', Icon: Flame, color: overheatRisk > 60 ? '#f87171' : overheatRisk > 40 ? '#facc15' : '#4ade80' },
-    { label: 'Failure Risk', value: failureRisk, unit: '%', Icon: Zap, color: failureRisk > 60 ? '#f87171' : failureRisk > 40 ? '#facc15' : '#4ade80' },
-  ];
+  const statusConfig = aiAnalysis
+    ? aiAnalysis.status === 'healthy'
+      ? { label: 'HEALTHY', icon: ShieldCheck, color: '#22c55e', bg: 'rgba(34,197,94,0.12)', border: '#22c55e' }
+      : aiAnalysis.status === 'warning'
+      ? { label: 'WARNING', icon: AlertTriangle, color: '#eab308', bg: 'rgba(234,179,8,0.12)', border: '#eab308' }
+      : { label: 'CRITICAL', icon: AlertOctagon, color: '#ef4444', bg: 'rgba(239,68,68,0.12)', border: '#ef4444' }
+    : null;
 
   return (
-    <div className="panel flex flex-col" style={{ height: '100%' }}>
-      <div className="flex items-center gap-2 px-3 py-2" style={{ borderBottom: '1px solid #1e2d45' }}>
-        <Activity size={13} className="text-blue-400" />
-        <span className="text-xs font-semibold text-slate-200 tracking-wide">AI HEALTH ANALYSIS</span>
+    <div className="panel" style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div className="flex items-center justify-between px-3" style={{ height: 28, borderBottom: '1px solid #1e2d45', background: 'linear-gradient(180deg,#151f33 0%,#0f1726 100%)', flexShrink: 0 }}>
+        <div className="flex items-center gap-2">
+          <Cpu size={13} style={{ color: '#3b82f6' }} />
+          <span className="text-[11px] font-semibold tracking-wider" style={{ color: '#c8d6ea' }}>AI HEALTH ANALYSIS</span>
+        </div>
+        {statusConfig && (
+          <span className="flex items-center gap-1 px-2 py-0.5 text-[9px] font-bold tracking-wider"
+            style={{ color: statusConfig.color, background: statusConfig.bg, border: `1px solid ${statusConfig.border}40`, borderRadius: 2 }}>
+            <statusConfig.icon size={10} /> {statusConfig.label}
+          </span>
+        )}
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-3">
-        {/* Gauge + status */}
-        <div className="flex items-center gap-4">
-          <div className="relative" style={{ width: size, height: size, flexShrink: 0 }}>
-            <svg width={size} height={size}>
-              <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#1a2540" strokeWidth={stroke} />
-              <circle
-                cx={size / 2}
-                cy={size / 2}
-                r={r}
-                fill="none"
-                stroke={ringColor}
-                strokeWidth={stroke}
-                strokeLinecap="round"
-                strokeDasharray={c}
-                strokeDashoffset={offset}
-                transform={`rotate(-90 ${size / 2} ${size / 2})`}
-                style={{ transition: 'stroke-dashoffset 0.4s ease, stroke 0.4s ease' }}
-              />
-            </svg>
-            <div className="absolute inset-0 flex flex-col items-center justify-center">
-              <span className="text-2xl font-bold" style={{ color: ringColor }}>{healthScore}</span>
-              <span className="text-[9px] text-slate-500 tracking-wide">SCORE</span>
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center gap-1.5 px-2 py-1" style={{ background: sc.bg, border: `1px solid ${sc.color}40` }}>
-              <sc.Icon size={12} style={{ color: sc.color }} />
-              <span className="text-[10px] font-semibold tracking-wide" style={{ color: sc.color }}>{sc.label}</span>
-            </div>
-            <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
-              <Clock size={11} className="text-slate-500" />
-              <span>RUL:</span>
-              <span className="font-semibold val-cyan">{rulHours} h</span>
-            </div>
-          </div>
+      {!aiAnalysis ? (
+        <div className="flex flex-col items-center justify-center gap-2" style={{ flex: 1, padding: 24 }}>
+          <Activity size={28} className="text-slate-600" />
+          <span className="text-xs text-slate-500 text-center">No machine selected.<br />Select a machine to view AI analysis.</span>
         </div>
-
-        {/* Metric cards */}
-        <div className="grid grid-cols-3 gap-2">
-          {metrics.map((m) => (
-            <div key={m.label} className="p-2" style={{ background: '#0e1726', border: '1px solid #1e2d45' }}>
-              <div className="flex items-center gap-1 mb-1">
-                <m.Icon size={10} style={{ color: m.color }} />
-                <span className="text-[9px] text-slate-400 truncate">{m.label}</span>
+      ) : (
+        <div style={{ flex: 1, overflowY: 'auto', padding: 12 }} className="flex flex-col gap-3">
+          {/* Gauge + metrics */}
+          <div className="flex items-center gap-4">
+            <HealthGauge score={aiAnalysis.healthScore} />
+            <div className="flex flex-col gap-1.5" style={{ flex: 1 }}>
+              <div className="flex flex-col">
+                <span className="text-[9px] tracking-wider" style={{ color: '#64748b' }}>REMAINING USEFUL LIFE</span>
+                <span className="font-bold val-blue" style={{ fontSize: 16 }}>{aiAnalysis.rulHours.toLocaleString()} <span className="text-[10px] font-normal text-slate-500">hrs</span></span>
               </div>
-              <div className="flex items-baseline gap-0.5">
-                <span className="text-base font-bold" style={{ color: m.color }}>{m.value}</span>
-                <span className="text-[9px] text-slate-500">{m.unit}</span>
-              </div>
-              <div className="mt-1 h-1 rounded-full overflow-hidden" style={{ background: '#1a2540' }}>
-                <div style={{ width: `${m.value}%`, height: '100%', background: m.color, transition: 'width 0.4s ease' }} />
+              <div className="flex flex-col">
+                <span className="text-[9px] tracking-wider" style={{ color: '#64748b' }}>STATUS</span>
+                <span className="font-semibold text-[11px]" style={{ color: statusConfig!.color }}>{statusConfig!.label}</span>
               </div>
             </div>
-          ))}
-        </div>
+          </div>
 
-        {/* Anomalies */}
-        <div>
-          <div className="flex items-center gap-1 mb-1.5">
-            <Gauge size={11} className="text-slate-400" />
-            <span className="text-[10px] font-semibold text-slate-300 tracking-wide">DETECTED ANOMALIES</span>
+          {/* Risk stat pills */}
+          <div className="flex gap-2">
+            <StatPill label="BEARING WEAR" value={`${aiAnalysis.bearingWear}%`} icon={Wrench} color={aiAnalysis.bearingWear > 60 ? '#ef4444' : aiAnalysis.bearingWear > 30 ? '#eab308' : '#22c55e'} />
+            <StatPill label="OVERHEAT RISK" value={`${aiAnalysis.overheatRisk}%`} icon={Thermometer} color={aiAnalysis.overheatRisk > 60 ? '#ef4444' : aiAnalysis.overheatRisk > 30 ? '#eab308' : '#22c55e'} />
+            <StatPill label="FAILURE RISK" value={`${aiAnalysis.failureRisk}%`} icon={AlertOctagon} color={aiAnalysis.failureRisk > 60 ? '#ef4444' : aiAnalysis.failureRisk > 30 ? '#eab308' : '#22c55e'} />
           </div>
-          {anomalies.length === 0 ? (
-            <div className="text-[10px] text-slate-500 px-2 py-1.5" style={{ background: '#0e1726', border: '1px solid #1e2d45' }}>
-              No anomalies detected
-            </div>
-          ) : (
-            <div className="flex flex-col gap-1">
-              {anomalies.map((a, i) => (
-                <div key={i} className="flex items-start gap-1.5 px-2 py-1.5" style={{ background: '#0e1726', border: '1px solid #1e2d45' }}>
-                  <AlertTriangle size={10} className="text-yellow-400 mt-0.5 flex-shrink-0" />
-                  <span className="text-[10px] text-slate-300 leading-tight">{a}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
 
-        {/* Recommendation */}
-        <div>
-          <div className="flex items-center gap-1 mb-1.5">
-            <Lightbulb size={11} className="text-slate-400" />
-            <span className="text-[10px] font-semibold text-slate-300 tracking-wide">RECOMMENDATION</span>
+          {/* Anomalies */}
+          <div className="flex flex-col" style={{ flex: '0 0 auto' }}>
+            <span className="text-[9px] font-semibold tracking-wider mb-1.5" style={{ color: '#94a3b8' }}>DETECTED ANOMALIES</span>
+            {aiAnalysis.anomalies.length === 0 ? (
+              <div className="flex items-center gap-1.5 px-2 py-2" style={{ background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.2)' }}>
+                <ShieldCheck size={11} style={{ color: '#22c55e' }} />
+                <span className="text-[10px]" style={{ color: '#4ade80' }}>No anomalies detected</span>
+              </div>
+            ) : (
+              <div style={{ background: '#0a1220', border: '1px solid #1a2540', maxHeight: 120, overflowY: 'auto' }}>
+                {aiAnalysis.anomalies.map((a, i) => (
+                  <div key={i} className="anomaly-log-item flex items-start gap-2">
+                    <AlertTriangle size={10} style={{ color: '#eab308', marginTop: 1, flexShrink: 0 }} />
+                    <span className="text-slate-300" style={{ lineHeight: 1.3 }}>{a}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-          <div className="px-2 py-1.5 text-[10px] leading-relaxed" style={{ background: '#0e1726', border: '1px solid #1e2d45', color: sc.color }}>
-            {recommendation}
+
+          {/* Recommendation */}
+          <div className="flex flex-col" style={{ flex: '0 0 auto' }}>
+            <span className="text-[9px] font-semibold tracking-wider mb-1.5" style={{ color: '#94a3b8' }}>RECOMMENDATION</span>
+            <div className="flex items-start gap-2 px-2.5 py-2"
+              style={{ background: statusConfig!.color === '#22c55e' ? 'rgba(34,197,94,0.06)' : statusConfig!.color === '#eab308' ? 'rgba(234,179,8,0.06)' : 'rgba(239,68,68,0.06)',
+                border: `1px solid ${statusConfig!.color}30`, borderRadius: 2 }}>
+              <Wrench size={12} style={{ color: statusConfig!.color, marginTop: 1, flexShrink: 0 }} />
+              <span className="text-[10.5px]" style={{ color: '#c8d6ea', lineHeight: 1.4 }}>{aiAnalysis.recommendation}</span>
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

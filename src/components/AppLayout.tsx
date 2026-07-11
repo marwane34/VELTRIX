@@ -1,86 +1,84 @@
-import { ReactNode } from 'react';
-import { LayoutDashboard, Cpu, Bell, TrendingUp, Radio, LogOut } from 'lucide-react';
+import { type ReactNode } from 'react';
+import { LayoutDashboard, Cpu, Bell, TrendingUp, Radio, FileClock, LogOut } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useMonitoring } from '../contexts/MonitoringContext';
 
-export type NavItem = 'dashboard' | 'machines' | 'alerts' | 'analytics' | 'communication';
+export type NavItem = 'dashboard' | 'machines' | 'alerts' | 'analytics' | 'communication' | 'export_history';
 
-interface Props {
+interface AppLayoutProps {
   children: ReactNode;
   activeNav: NavItem;
   onNavigate: (item: NavItem) => void;
   onOpenNotifications: () => void;
 }
 
-const navItems: { key: NavItem; label: string; Icon: typeof LayoutDashboard }[] = [
-  { key: 'dashboard', label: 'Dashboard', Icon: LayoutDashboard },
-  { key: 'machines', label: 'Machines', Icon: Cpu },
-  { key: 'alerts', label: 'Alerts', Icon: Bell },
-  { key: 'analytics', label: 'Analytics', Icon: TrendingUp },
-  { key: 'communication', label: 'Communication', Icon: Radio },
+const NAV_ITEMS: { item: NavItem; label: string; icon: typeof LayoutDashboard }[] = [
+  { item: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { item: 'machines', label: 'Machines', icon: Cpu },
+  { item: 'alerts', label: 'Alerts', icon: Bell },
+  { item: 'analytics', label: 'Analytics', icon: TrendingUp },
+  { item: 'communication', label: 'Communication', icon: Radio },
+  { item: 'export_history', label: 'Export History', icon: FileClock },
 ];
 
 /**
- * Top-level application shell with a horizontal top navigation bar. Renders the
- * VELTRIX brand, the five primary nav buttons (with an unread-alert badge on
- * the Alerts item), a notification bell and a logout control.
+ * AppLayout — top-level layout with a horizontal top nav bar (44px).
+ * Left: VELTRIX logo + title. Center: 6 nav buttons. Right: notifications + logout.
  */
-export function AppLayout({ children, activeNav, onNavigate, onOpenNotifications }: Props) {
+export function AppLayout({ children, activeNav, onNavigate, onOpenNotifications }: AppLayoutProps) {
   const { signOut } = useAuth();
   const { unreadCount } = useMonitoring();
 
   return (
     <div className="dashboard-root">
-      {/* Top navigation bar */}
-      <div
-        className="flex items-center justify-between px-3 flex-shrink-0"
-        style={{
-          height: 44,
-          background: 'linear-gradient(180deg,#0d1525 0%,#080d14 100%)',
-          borderBottom: '1px solid #1e2d45',
-        }}
-      >
-        {/* Brand */}
-        <div className="flex items-center gap-2">
-          <img src="/assets/veltrix-logo.svg" alt="VELTRIX" width={24} height={24} />
+      {/* Title bar */}
+      <div className="title-bar">
+        <span className="title-bar-title">VELTRIX SCADA — Condition Monitoring System</span>
+      </div>
+
+      {/* Top navigation bar (44px) */}
+      <div className="flex items-center px-3 gap-3" style={{ height: 44, background: 'linear-gradient(180deg,#0d1525 0%,#0b1220 100%)', borderBottom: '1px solid #1e2d45', flexShrink: 0 }}>
+        {/* Left: Logo + title */}
+        <div className="flex items-center gap-2" style={{ minWidth: 150 }}>
+          <img src="/assets/veltrix-logo.svg" alt="VELTRIX" width={24} height={24} style={{ display: 'block' }} />
           <div className="flex flex-col leading-none">
-            <span className="text-sm font-bold text-slate-100 tracking-wide">VELTRIX</span>
-            <span className="text-[8px] text-slate-500 tracking-[2px]">SCADA</span>
+            <span className="font-bold tracking-wide" style={{ fontSize: 14, color: '#e2e8f0' }}>VELTRIX</span>
+            <span className="text-[8px] tracking-[2px] font-semibold" style={{ color: '#3b82f6' }}>SCADA</span>
           </div>
         </div>
 
-        {/* Nav buttons */}
-        <div className="flex items-center gap-1">
-          {navItems.map(({ key, label, Icon }) => {
-            const active = activeNav === key;
+        {/* Center: Nav buttons */}
+        <div className="flex items-center gap-1 mx-auto">
+          {NAV_ITEMS.map(({ item, label, icon: Icon }) => {
+            const active = activeNav === item;
             return (
               <button
-                key={key}
-                onClick={() => onNavigate(key)}
-                className="flex items-center gap-1.5 px-3 transition-all"
+                key={item}
+                onClick={() => onNavigate(item)}
+                className="flex items-center gap-1.5 transition-all"
                 style={{
-                  height: 30,
+                  padding: '6px 12px',
                   fontSize: 11,
-                  fontWeight: 600,
+                  fontWeight: active ? 600 : 500,
                   letterSpacing: '0.3px',
-                  background: active ? 'rgba(59,130,246,0.15)' : 'transparent',
+                  cursor: 'pointer',
+                  background: active ? 'linear-gradient(180deg,#1a3a6e 0%,#0f2547 100%)' : 'transparent',
                   border: active ? '1px solid #3b82f6' : '1px solid transparent',
                   color: active ? '#60a5fa' : '#94a3b8',
+                  borderRadius: 3,
+                  position: 'relative',
                 }}
+                onMouseEnter={(e) => { if (!active) { e.currentTarget.style.color = '#c8d6ea'; e.currentTarget.style.background = '#111827'; } }}
+                onMouseLeave={(e) => { if (!active) { e.currentTarget.style.color = '#94a3b8'; e.currentTarget.style.background = 'transparent'; } }}
               >
                 <Icon size={13} />
                 <span>{label}</span>
-                {key === 'alerts' && unreadCount > 0 && (
-                  <span
-                    className="flex items-center justify-center text-[9px] font-bold text-white"
+                {item === 'alerts' && unreadCount > 0 && (
+                  <span className="flex items-center justify-center font-bold"
                     style={{
-                      minWidth: 15,
-                      height: 15,
-                      padding: '0 4px',
-                      background: '#ef4444',
-                      border: '1px solid #7f1d1d',
-                    }}
-                  >
+                      minWidth: 15, height: 15, padding: '0 4px', fontSize: 9,
+                      color: '#fff', background: '#ef4444', borderRadius: 8, marginLeft: 2,
+                    }}>
                     {unreadCount > 99 ? '99+' : unreadCount}
                   </span>
                 )}
@@ -89,43 +87,40 @@ export function AppLayout({ children, activeNav, onNavigate, onOpenNotifications
           })}
         </div>
 
-        {/* Right controls */}
-        <div className="flex items-center gap-2">
+        {/* Right: Notifications + Logout */}
+        <div className="flex items-center gap-2" style={{ minWidth: 150, justifyContent: 'flex-end' }}>
           <button
             onClick={onOpenNotifications}
-            className="relative flex items-center justify-center toolbar-icon-btn"
-            style={{ width: 32, height: 30 }}
+            className="flex items-center justify-center relative"
+            style={{ width: 30, height: 30, background: '#111827', border: '1px solid #1e2d45', borderRadius: 3, cursor: 'pointer', color: '#94a3b8', transition: 'all 0.15s' }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#3b82f6'; e.currentTarget.style.color = '#60a5fa'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#1e2d45'; e.currentTarget.style.color = '#94a3b8'; }}
             title="Notifications"
           >
             <Bell size={14} />
             {unreadCount > 0 && (
-              <span
-                className="absolute flex items-center justify-center text-[8px] font-bold text-white"
+              <span className="flex items-center justify-center font-bold"
                 style={{
-                  top: -4, right: -4,
-                  minWidth: 14, height: 14, padding: '0 3px',
-                  background: '#ef4444', border: '1px solid #0d1525',
-                }}
-              >
+                  position: 'absolute', top: -4, right: -4, minWidth: 15, height: 15, padding: '0 4px',
+                  fontSize: 9, color: '#fff', background: '#ef4444', borderRadius: 8, border: '1px solid #0d1525',
+                }}>
                 {unreadCount > 99 ? '99+' : unreadCount}
               </span>
             )}
           </button>
-
           <button
-            onClick={() => signOut()}
-            className="flex items-center gap-1.5 btn-danger"
-            style={{ height: 30 }}
-            title="Logout"
+            onClick={() => void signOut()}
+            className="btn-danger flex items-center gap-1.5"
+            title="Sign out"
           >
-            <LogOut size={13} />
+            <LogOut size={12} />
             <span>Logout</span>
           </button>
         </div>
       </div>
 
-      {/* Page content */}
-      <div className="flex-1 overflow-hidden">{children}</div>
+      {/* Main content area */}
+      <div className="main-layout">{children}</div>
     </div>
   );
 }

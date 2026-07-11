@@ -10,6 +10,7 @@ export function useSimulatedData(running: boolean, anomalyLevel: number) {
   const [freqBars, setFreqBars] = useState<FreqBar[]>([]);
   const [currentTrend, setCurrentTrend] = useState<TrendPoint[]>([]);
   const [tempTrend, setTempTrend] = useState<TrendPoint[]>([]);
+  const [healthTrend, setHealthTrend] = useState<TrendPoint[]>([]);
   const [temperature, setTemperature] = useState(45);
   const [currentVal, setCurrentVal] = useState(2.0);
   const [rmsX, setRmsX] = useState(0.8);
@@ -47,12 +48,14 @@ export function useSimulatedData(running: boolean, anomalyLevel: number) {
           bars.push({ freq: f * 25, amp: +amp.toFixed(3) });
         }
         setFreqBars(bars);
+        const healthScore = Math.max(0, Math.min(100, 85 + Math.sin(t * 0.02) * 10 - anomalyLevel * 20));
+        setHealthTrend((prev) => [...prev.slice(-59), { t, v: +healthScore.toFixed(1) }]);
       }
     }, 100);
     return () => clearInterval(interval);
   }, [running, anomalyLevel]);
 
-  return { vibration, freqBars, currentTrend, tempTrend, temperature, currentVal, rmsX, rmsY, rpm, timestamp };
+  return { vibration, freqBars, currentTrend, tempTrend, healthTrend, temperature, currentVal, rmsX, rmsY, rpm, timestamp };
 }
 
 export function runAIAnalysis(
