@@ -106,6 +106,17 @@ body {
   color: #c8d6ea; border-color: #3b5278;
 }
 
+.btn-danger {
+  background: linear-gradient(180deg, #3b1818 0%, #1f0e0e 100%);
+  border: 1px solid #7f1d1d; color: #f87171;
+  font-size: 12px; font-weight: 600; cursor: pointer;
+  padding: 6px 14px; transition: all 0.15s;
+}
+.btn-danger:hover {
+  background: linear-gradient(180deg, #4a1e1e 0%, #2a1212 100%);
+  box-shadow: 0 0 8px rgba(239,68,68,0.3);
+}
+
 .chart-grid-line { stroke: #1a2540; stroke-width: 1; stroke-dasharray: 4, 4; }
 
 .machine-active {

@@ -23,30 +23,23 @@ export function useSimulatedData(running: boolean, anomalyLevel: number) {
     const interval = setInterval(() => {
       const t = tRef.current++;
       setTimestamp(new Date().toISOString());
-
       const baseX = Math.sin(t * 0.3) * 0.5 + (Math.random() - 0.5) * 0.3;
       const baseY = Math.cos(t * 0.25) * 0.4 + (Math.random() - 0.5) * 0.2;
       const noiseX = (Math.random() - 0.5) * anomalyLevel * 2;
       const noiseY = (Math.random() - 0.5) * anomalyLevel * 1.5;
-
       setVibration((prev) => [...prev.slice(-199), { t, x: baseX + noiseX, y: baseY + noiseY }]);
-
       const rmsXVal = Math.sqrt((baseX + noiseX) ** 2);
       const rmsYVal = Math.sqrt((baseY + noiseY) ** 2);
       setRmsX(+rmsXVal.toFixed(3));
       setRmsY(+rmsYVal.toFixed(3));
-
       const newTemp = 45 + Math.sin(t * 0.05) * 10 + anomalyLevel * 15 + (Math.random() - 0.5) * 2;
       setTemperature(+newTemp.toFixed(1));
       setTempTrend((prev) => [...prev.slice(-59), { t, v: +newTemp.toFixed(1) }]);
-
       const newCurrent = 2.0 + Math.sin(t * 0.08) * 0.5 + anomalyLevel * 1.5 + (Math.random() - 0.5) * 0.3;
       setCurrentVal(+newCurrent.toFixed(2));
       setCurrentTrend((prev) => [...prev.slice(-59), { t, v: +newCurrent.toFixed(2) }]);
-
       const newRpm = 1500 + Math.sin(t * 0.03) * 50 + (Math.random() - 0.5) * 20;
       setRpm(Math.round(newRpm));
-
       if (t % 5 === 0) {
         const bars: FreqBar[] = [];
         for (let f = 1; f <= 32; f++) {
@@ -70,24 +63,19 @@ export function runAIAnalysis(
   const tempRatio = readings.temperature / machine.temp_max;
   const vibRatio = vibRms / machine.rms_max;
   const currRatio = readings.current / machine.current_max;
-
   const bearingWear = Math.min(100, Math.max(0, (vibRatio - 0.5) * 60 + (tempRatio - 0.5) * 30));
   const overheatRisk = Math.min(100, Math.max(0, (tempRatio - 0.7) * 80));
   const failureRisk = Math.min(100, Math.max(0, bearingWear * 0.4 + overheatRisk * 0.3 + (currRatio - 0.7) * 50));
   const healthScore = Math.max(0, Math.min(100, 100 - failureRisk * 0.8 - bearingWear * 0.2));
-
   const anomalies: string[] = [];
   if (vibRatio > 0.8) anomalies.push('Vibration exceeds 80% of threshold');
   if (tempRatio > 0.85) anomalies.push('Temperature approaching critical limit');
   if (currRatio > 0.8) anomalies.push('Current draw abnormally high');
   if (readings.rpm < 1200) anomalies.push('RPM below expected operating range');
-
   const status: AIAnalysis['status'] = healthScore > 70 ? 'healthy' : healthScore > 40 ? 'warning' : 'critical';
   const rulHours = Math.max(0, Math.round((100 - bearingWear) * 50 + (healthScore * 10)));
-
   let recommendation = 'All systems operating within normal parameters.';
   if (status === 'warning') recommendation = 'Schedule preventive maintenance within 2 weeks. Monitor bearing temperatures closely.';
   if (status === 'critical') recommendation = 'Immediate maintenance required. Risk of failure is high. Reduce load and inspect bearings.';
-
   return { healthScore: Math.round(healthScore), status, bearingWear: Math.round(bearingWear), overheatRisk: Math.round(overheatRisk), failureRisk: Math.round(failureRisk), rulHours, anomalies, recommendation };
 }

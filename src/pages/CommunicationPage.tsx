@@ -1,581 +1,591 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useMemo, FormEvent } from 'react';
 import {
-  Radio, Wifi, Usb, Network, Cloud, Globe, Save, Trash2, Play, Square,
-  RefreshCw, Activity, ChevronRight, Settings2, Usb as UsbIcon,
+  Radio, Usb, Wifi, Globe, Network, Server, RefreshCw, Plus, Trash2, Edit2,
+  Play, Square, Check, AlertTriangle, AlertCircle, Loader2, ChevronDown,
+  Database, Activity, X, Save, Eye,
 } from 'lucide-react';
-import { useCommunication, METHOD_LABELS, type CommMethod, type CommConfig } from '../contexts/CommunicationContext';
+import { useCommunication } from '../contexts/CommunicationContext';
+import type { CommMethod, CommConfig, CommSetting, ConnStatus } from '../contexts/CommunicationContext';
 import { useMonitoring } from '../contexts/MonitoringContext';
 import { useToast } from '../components/Toast';
 
-const METHOD_ICONS: Record<CommMethod, typeof Radio> = {
-  usb_serial: Usb,
-  wifi: Wifi,
-  mqtt: Network,
-  modbus_tcp: Activity,
-  opcua: Cloud,
-  rest_api: Globe,
+/* ----------------------------- helpers ----------------------------- */
+
+const methodMeta: Record<CommMethod, { label: string; sub: string; Icon: typeof Radio; color: string }> = {
+  usb_serial: { label: 'USB Serial', sub: 'ESP32/Arduino', Icon: Usb, color: '#3b82f6' },
+  wifi: { label: 'Wi-Fi', sub: 'TCP / WebSocket', Icon: Wifi, color: '#06b6d4' },
+  mqtt: { label: 'MQTT', sub: 'Pub/Sub broker', Icon: Radio, color: '#8b5cf6' },
+  rest_api: { label: 'REST API', sub: 'HTTP polling', Icon: Globe, color: '#22c55e' },
+  modbus_tcp: { label: 'Modbus TCP', sub: 'Industrial bus', Icon: Network, color: '#f97316' },
+  opcua: { label: 'OPC UA', sub: 'Process control', Icon: Server, color: '#eab308' },
 };
 
-const METHOD_DESCRIPTIONS: Record<CommMethod, string> = {
-  usb_serial: 'Serial communication via USB / COM port. Uses Web Serial API or simulated data.',
-  wifi: 'WebSocket connection to Wi-Fi enabled device streaming sensor data.',
-  mqtt: 'MQTT over WebSocket protocol for pub/sub telemetry.',
-  modbus_tcp: 'Modbus TCP via WebSocket gateway with register polling.',
-  opcua: 'OPC UA server connection via WebSocket gateway.',
-  rest_api: 'HTTP REST API polling with configurable interval.',
+const methodOrder: CommMethod[] = ['usb_serial', 'wifi', 'mqtt', 'rest_api', 'modbus_tcp', 'opcua'];
+
+const statusConfig: Record<ConnStatus, { color: string; label: string; Icon: typeof Check | null }> = {
+  connected: { color: '#22c55e', label: 'Connected', Icon: Check },
+  connecting: { color: '#eab308', label: 'Connecting', Icon: Loader2 },
+  disconnected: { color: '#64748b', label: 'Disconnected', Icon: null },
+  error: { color: '#ef4444', label: 'Error', Icon: AlertCircle },
 };
 
-const STATUS_CONFIG: Record<string, { color: string; label: string }> = {
-  disconnected: { color: '#64748b', label: 'Disconnected' },
-  connecting: { color: '#eab308', label: 'Connecting...' },
-  connected: { color: '#22c55e', label: 'Connected' },
-  error: { color: '#ef4444', label: 'Error' },
+const baudRates = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600];
+const authTypes: { key: CommConfig['authType']; label: string }[] = [
+  { key: 'none', label: 'None' },
+  { key: 'bearer', label: 'Bearer Token' },
+  { key: 'apikey', label: 'API Key' },
+  { key: 'basic', label: 'Basic Auth' },
+];
+
+function fmtTime(iso: string) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function statusOf(setting: CommSetting, activeId: string | null, activeStatus: ConnStatus): ConnStatus {
+  if (activeId && setting.id === activeId) return activeStatus;
+  return setting.status ?? 'disconnected';
+}
+
+function configSummary(method: CommMethod, c: CommConfig): string {
+  switch (method) {
+    case 'usb_serial': return `${c.port ?? 'COM?'} @ ${c.baudRate ?? 115200} baud`;
+    case 'wifi': return `${c.ipAddress ?? '—'}:${c.wifiPort ?? 80}`;
+    case 'mqtt': return `${c.broker ?? '—'}:${c.mqttPort ?? 1883} · ${c.topic ?? 'veltrix/data'}`;
+    case 'rest_api': return `${c.endpointUrl ?? '—'}`;
+    case 'modbus_tcp': return `${c.ipAddress ?? '—'}:${c.wifiPort ?? 502} · slave ${c.slaveId ?? 1}`;
+    case 'opcua': return `${c.serverUrl ?? '—'}`;
+    default: return '';
+  }
+}
+
+const emptyConfig: CommConfig = {
+  port: '', baudRate: 115200, autoReconnect: true,
+  ipAddress: '', wifiPort: 80,
+  broker: '', mqttPort: 1883, username: '', password: '', topic: 'veltrix/data', ssl: false,
+  endpointUrl: '', authType: 'none', apiKey: '', pollInterval: 2,
+  slaveId: 1, registerMap: [{ address: 40001, name: 'temperature', type: 'float' }],
+  serverUrl: 'opc.tcp://', nodeId: 'ns=2;s=Temperature',
 };
 
-export function CommunicationPage() {
+interface Props {}
+
+/**
+ * Full industrial communication manager. Supports six protocols (USB Serial,
+ * Wi-Fi, MQTT, REST API, Modbus TCP, OPC UA): a method picker, per-method
+ * configuration form, saved-configs list with connect/disconnect/edit/delete,
+ * and a live data viewer with packet list + JSON inspector.
+ */
+export function CommunicationPage(_: Props) {
   const {
-    settings, activeSetting, activeStatus, incomingData, dataBuffer,
-    saveSetting, deleteSetting, activateSetting, connect, disconnect,
-    refreshSettings, clearBuffer, availablePorts, refreshPorts,
+    settings, activeSetting, activeStatus, incomingData, saveSetting, updateSetting,
+    deleteSetting, connect, disconnect, refreshSettings, clearBuffer, availablePorts, refreshPorts,
   } = useCommunication();
-  const { machines, selectedMachine, selectMachine } = useMonitoring();
-  const { success, error } = useToast();
+  const { machines } = useMonitoring();
+  const { toast } = useToast();
 
-  const [selectedMethod, setSelectedMethod] = useState<CommMethod>('wifi');
-  const [configName, setConfigName] = useState('');
-  const [config, setConfig] = useState<CommConfig>({
-    host: 'localhost',
-    port: 8080,
-    baudRate: 9600,
-    serialPort: '',
-    broker: '',
-    topic: 'sensor/data',
-    endpoint: 'http://localhost:3000/api/sensors',
-    pollInterval: 2000,
-    unitId: 1,
-    registerStart: 0,
-    registerCount: 10,
-    nodeId: 'ns=2;s=Temperature',
-    autoReconnect: true,
-  });
+  const [selectedMethod, setSelectedMethod] = useState<CommMethod | null>(null);
+  const [config, setConfig] = useState<CommConfig>(emptyConfig);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [selectedPacket, setSelectedPacket] = useState<number | null>(null);
+  const [connectingId, setConnectingId] = useState<string | null>(null);
 
-  useEffect(() => {
-    refreshSettings();
-    refreshPorts();
-  }, [refreshSettings, refreshPorts]);
+  function selectMethod(method: CommMethod) {
+    setSelectedMethod(method);
+    setConfig({ ...emptyConfig });
+    setEditingId(null);
+  }
 
-  const methods = Object.keys(METHOD_LABELS) as CommMethod[];
+  function startEdit(s: CommSetting) {
+    setSelectedMethod(s.method);
+    setConfig({ ...emptyConfig, ...s.config });
+    setEditingId(s.id);
+  }
 
-  const handleSave = async () => {
-    if (!configName.trim()) {
-      error('Configuration name is required');
-      return;
-    }
+  async function handleSave(e: FormEvent) {
+    e.preventDefault();
+    if (!selectedMethod) return;
+    if (selectedMethod === 'usb_serial' && !config.port) { toast('Select a COM port', 'error'); return; }
+    if ((selectedMethod === 'wifi' || selectedMethod === 'modbus_tcp') && !config.ipAddress) { toast('IP address required', 'error'); return; }
+    if (selectedMethod === 'mqtt' && !config.broker) { toast('Broker required', 'error'); return; }
+    if (selectedMethod === 'rest_api' && !config.endpointUrl) { toast('Endpoint URL required', 'error'); return; }
+    if (selectedMethod === 'opcua' && !config.serverUrl) { toast('Server URL required', 'error'); return; }
+
     setSaving(true);
-    await saveSetting(configName.trim(), selectedMethod, config);
-    setSaving(false);
-    setConfigName('');
-    success('Configuration saved');
-  };
-
-  const handleConnect = async () => {
-    if (!activeSetting) {
-      // Create a temporary setting from current config
-      if (!configName.trim()) {
-        error('Select or save a configuration first');
-        return;
+    const name = `${methodMeta[selectedMethod].label} ${config.machineId ? machines.find((m) => m.id === config.machineId)?.name ?? '' : ''}`.trim();
+    try {
+      if (editingId) {
+        await updateSetting(editingId, { name, config });
+        toast('Configuration updated', 'success');
+      } else {
+        await saveSetting(selectedMethod, name, config);
+        toast('Configuration saved', 'success');
       }
-      await saveSetting(configName.trim(), selectedMethod, config);
-      await refreshSettings();
+      setConfig({ ...emptyConfig });
+      setEditingId(null);
+      setSelectedMethod(null);
+    } catch (err) {
+      toast('Save failed', 'error');
     }
-    await connect();
-    success(`Connecting via ${METHOD_LABELS[selectedMethod]}...`);
-  };
+    setSaving(false);
+  }
 
-  const handleDisconnect = () => {
-    disconnect();
-    success('Disconnected');
-  };
-
-  const handleActivate = (id: string) => {
-    activateSetting(id);
-    const setting = settings.find((s) => s.id === id);
-    if (setting) {
-      setSelectedMethod(setting.method);
-      setConfig(setting.config);
-      setConfigName(setting.name);
+  async function handleConnect(id: string) {
+    setConnectingId(id);
+    try {
+      await connect(id);
+      toast('Connecting…', 'info');
+    } catch {
+      toast('Connection failed', 'error');
     }
-  };
+    setConnectingId(null);
+  }
 
-  const handleDelete = async (id: string) => {
+  async function handleDelete(id: string) {
     await deleteSetting(id);
-    success('Configuration deleted');
-  };
+    toast('Configuration deleted', 'success');
+  }
 
-  const updateConfig = (updates: Partial<CommConfig>) => {
-    setConfig((prev) => ({ ...prev, ...updates }));
-  };
-
-  const statusCfg = STATUS_CONFIG[activeStatus];
+  const packetCount = incomingData.length;
+  const selPacket = selectedPacket != null ? incomingData[selectedPacket] : null;
 
   const inputStyle: React.CSSProperties = {
-    width: '100%', background: '#060b14', border: '1px solid #1e2d45',
-    color: '#e2e8f0', padding: '6px 10px', borderRadius: 4,
-    fontSize: 12, outline: 'none',
+    width: '100%', background: '#080d14', border: '1px solid #1e2d45', color: '#e2e8f0', fontSize: 11, padding: '6px 9px', outline: 'none',
   };
-  const labelStyle: React.CSSProperties = {
-    fontSize: 10, color: '#94a3b8', marginBottom: 4, display: 'block', fontWeight: 600,
-    letterSpacing: '0.3px',
-  };
+  const labelStyle: React.CSSProperties = { fontSize: 10, color: '#64748b', letterSpacing: '0.3px', marginBottom: 2 };
 
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div className="flex flex-col h-full" style={{ background: '#0b0f1a' }}>
       {/* Header */}
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '10px 16px', borderBottom: '1px solid #1e2d45',
-        background: 'linear-gradient(180deg, #0d1220 0%, #080d14 100%)',
-        flexShrink: 0,
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <Radio size={18} color="#3b82f6" />
-          <span style={{ fontSize: 14, fontWeight: 700, color: '#e2e8f0', letterSpacing: '1px' }}>
-            COMMUNICATION MANAGER
+      <div className="flex items-center gap-3 px-4 py-3 flex-shrink-0" style={{ borderBottom: '1px solid #1e2d45', background: 'linear-gradient(180deg,#0d1525 0%,#080d14 100%)' }}>
+        <Radio size={18} className="text-blue-400" />
+        <span className="text-sm font-bold text-slate-100 tracking-wide">COMMUNICATION MANAGER</span>
+        {/* Active status badge */}
+        {activeSetting ? (
+          <span className="flex items-center gap-1.5 px-2 py-1" style={{ background: `${statusConfig[activeStatus].color}1a`, border: `1px solid ${statusConfig[activeStatus].color}40` }}>
+            <span className={`flex-shrink-0 ${activeStatus === 'connected' ? 'status-dot-active' : activeStatus === 'connecting' ? 'animate-spin' : ''}`} style={{ width: 7, height: 7, borderRadius: '50%', background: statusConfig[activeStatus].color }} />
+            <span className="text-[10px] font-semibold tracking-wide" style={{ color: statusConfig[activeStatus].color }}>
+              {methodMeta[activeSetting.method].label} — {statusConfig[activeStatus].label}
+            </span>
           </span>
-          <span style={{
-            fontSize: 10, fontWeight: 700, color: statusCfg.color,
-            background: `${statusCfg.color}20`, padding: '2px 8px', borderRadius: 8,
-            display: 'inline-flex', alignItems: 'center', gap: 4,
-          }}>
-            <div style={{ width: 5, height: 5, borderRadius: '50%', background: statusCfg.color }} />
-            {statusCfg.label}
+        ) : (
+          <span className="flex items-center gap-1.5 px-2 py-1" style={{ background: 'rgba(100,116,139,0.12)', border: '1px solid rgba(100,116,139,0.4)' }}>
+            <span className="flex-shrink-0" style={{ width: 7, height: 7, borderRadius: '50%', background: '#64748b' }} />
+            <span className="text-[10px] font-semibold tracking-wide text-slate-400">No active connection</span>
           </span>
-        </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <select
-            value={selectedMachine?.id ?? ''}
-            onChange={(e) => selectMachine(e.target.value)}
-            style={{
-              background: '#060b14', border: '1px solid #1e2d45', color: '#e2e8f0',
-              padding: '5px 10px', borderRadius: 4, fontSize: 11, outline: 'none',
-            }}
-          >
-            {machines.map((m) => (
-              <option key={m.id} value={m.id}>{m.name}</option>
-            ))}
-          </select>
-          {activeStatus === 'connected' || activeStatus === 'connecting' ? (
-            <button className="btn-secondary" onClick={handleDisconnect} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Square size={12} />
-              Disconnect
-            </button>
-          ) : (
-            <button className="btn-monitor" onClick={handleConnect} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Play size={12} />
-              Connect
-            </button>
-          )}
-        </div>
+        )}
+        <button className="btn-secondary flex items-center gap-1.5 ml-auto" style={{ height: 28 }} onClick={refreshSettings}>
+          <RefreshCw size={12} /> Refresh
+        </button>
       </div>
 
-      {/* Main content: two panels */}
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-        {/* Left panel: method picker + config + saved */}
-        <div style={{
-          width: 420, minWidth: 420,
-          borderRight: '1px solid #1e2d45',
-          display: 'flex', flexDirection: 'column',
-          overflow: 'hidden',
-        }}>
-          {/* Method picker */}
-          <div style={{ padding: '12px 16px', borderBottom: '1px solid #1e2d45' }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', letterSpacing: '1px', marginBottom: 8 }}>
-              PROTOCOL
+      {/* Body */}
+      <div className="flex-1 overflow-hidden flex gap-0">
+        {/* Left panel: picker + form + saved configs */}
+        <div className="flex flex-col flex-shrink-0 overflow-y-auto" style={{ width: 420, borderRight: '1px solid #1e2d45', background: '#0e1420' }}>
+          {/* Protocol picker */}
+          <div className="p-3" style={{ borderBottom: '1px solid #1e2d45' }}>
+            <div className="flex items-center gap-1.5 mb-2">
+              <Activity size={12} className="text-blue-400" />
+              <span className="text-[11px] font-semibold text-slate-200 tracking-wide">SELECT PROTOCOL</span>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
-              {methods.map((method) => {
-                const Icon = METHOD_ICONS[method];
+            <div className="grid gap-1.5" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+              {methodOrder.map((method) => {
+                const meta = methodMeta[method];
                 const active = selectedMethod === method;
                 return (
                   <button
                     key={method}
-                    onClick={() => setSelectedMethod(method)}
+                    onClick={() => selectMethod(method)}
+                    className="flex flex-col items-center gap-1 p-2 transition-all"
                     style={{
-                      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-                      padding: '10px 6px',
-                      background: active ? '#3b82f615' : '#060b14',
-                      border: '1px solid',
-                      borderColor: active ? '#3b82f6' : '#1e2d45',
-                      borderRadius: 6, cursor: 'pointer',
-                      transition: 'all 0.15s',
+                      background: active ? `${meta.color}1a` : '#0e1726',
+                      border: active ? `1px solid ${meta.color}` : '1px solid #1e2d45',
+                      cursor: 'pointer',
                     }}
                   >
-                    <Icon size={18} color={active ? '#3b82f6' : '#64748b'} />
-                    <span style={{
-                      fontSize: 9, fontWeight: 600,
-                      color: active ? '#60a5fa' : '#94a3b8',
-                      textAlign: 'center',
-                    }}>
-                      {METHOD_LABELS[method]}
-                    </span>
+                    <meta.Icon size={18} style={{ color: active ? meta.color : '#94a3b8' }} />
+                    <div className="flex flex-col items-center">
+                      <span className="text-[9px] font-semibold text-slate-200 leading-tight">{meta.label}</span>
+                      <span className="text-[7px] text-slate-500 leading-tight">{meta.sub}</span>
+                    </div>
                   </button>
                 );
               })}
             </div>
-            <div style={{ fontSize: 10, color: '#64748b', marginTop: 8, lineHeight: 1.4 }}>
-              {METHOD_DESCRIPTIONS[selectedMethod]}
-            </div>
           </div>
 
           {/* Config form */}
-          <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px' }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', letterSpacing: '1px', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Settings2 size={12} />
-              CONFIGURATION
-            </div>
-
-            <div style={{ marginBottom: 10 }}>
-              <label style={labelStyle}>Configuration Name</label>
-              <input
-                type="text"
-                value={configName}
-                onChange={(e) => setConfigName(e.target.value)}
-                placeholder="e.g. Pump Station Wi-Fi"
-                style={inputStyle}
-              />
-            </div>
-
-            {/* Method-specific fields */}
-            {selectedMethod === 'usb_serial' && (
-              <>
-                <div style={{ marginBottom: 10 }}>
-                  <label style={labelStyle}>Serial Port</label>
-                  <select
-                    value={config.serialPort ?? ''}
-                    onChange={(e) => updateConfig({ serialPort: e.target.value })}
-                    style={inputStyle}
-                  >
-                    <option value="">Select port...</option>
-                    {availablePorts.map((p) => (
-                      <option key={p} value={p}>{p}</option>
-                    ))}
-                  </select>
+          {selectedMethod && (
+            <form onSubmit={handleSave} className="p-3 flex flex-col gap-2.5" style={{ borderBottom: '1px solid #1e2d45' }}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  {(() => { const M = methodMeta[selectedMethod]; return <><M.Icon size={13} style={{ color: M.color }} /><span className="text-[11px] font-semibold text-slate-200 tracking-wide">{M.label.toUpperCase()} CONFIG</span></>; })()}
                 </div>
-                <div style={{ marginBottom: 10 }}>
-                  <label style={labelStyle}>Baud Rate</label>
-                  <select
-                    value={config.baudRate ?? 9600}
-                    onChange={(e) => updateConfig({ baudRate: parseInt(e.target.value) })}
-                    style={inputStyle}
-                  >
-                    {[9600, 19200, 38400, 57600, 115200].map((b) => (
-                      <option key={b} value={b}>{b}</option>
-                    ))}
-                  </select>
-                </div>
-              </>
-            )}
-
-            {(selectedMethod === 'wifi' || selectedMethod === 'modbus_tcp' || selectedMethod === 'opcua' || selectedMethod === 'mqtt') && (
-              <>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 100px', gap: 8, marginBottom: 10 }}>
-                  <div>
-                    <label style={labelStyle}>{selectedMethod === 'mqtt' ? 'Broker Host' : 'Host / IP'}</label>
-                    <input
-                      type="text"
-                      value={config.host ?? ''}
-                      onChange={(e) => updateConfig({ host: e.target.value, broker: e.target.value })}
-                      placeholder="192.168.1.100"
-                      style={inputStyle}
-                    />
-                  </div>
-                  <div>
-                    <label style={labelStyle}>Port</label>
-                    <input
-                      type="number"
-                      value={config.port ?? 8080}
-                      onChange={(e) => updateConfig({ port: parseInt(e.target.value) || 8080 })}
-                      style={inputStyle}
-                    />
-                  </div>
-                </div>
-                {selectedMethod === 'mqtt' && (
-                  <div style={{ marginBottom: 10 }}>
-                    <label style={labelStyle}>Topic</label>
-                    <input
-                      type="text"
-                      value={config.topic ?? ''}
-                      onChange={(e) => updateConfig({ topic: e.target.value })}
-                      placeholder="sensor/data"
-                      style={inputStyle}
-                    />
-                  </div>
+                {editingId && (
+                  <span className="px-1.5 py-0.5 text-[8px] text-yellow-400" style={{ background: 'rgba(234,179,8,0.12)', border: '1px solid rgba(234,179,8,0.3)' }}>EDITING</span>
                 )}
-                {selectedMethod === 'modbus_tcp' && (
-                  <>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginBottom: 10 }}>
-                      <div>
-                        <label style={labelStyle}>Unit ID</label>
-                        <input type="number" value={config.unitId ?? 1} onChange={(e) => updateConfig({ unitId: parseInt(e.target.value) || 1 })} style={inputStyle} />
-                      </div>
-                      <div>
-                        <label style={labelStyle}>Reg Start</label>
-                        <input type="number" value={config.registerStart ?? 0} onChange={(e) => updateConfig({ registerStart: parseInt(e.target.value) || 0 })} style={inputStyle} />
-                      </div>
-                      <div>
-                        <label style={labelStyle}>Reg Count</label>
-                        <input type="number" value={config.registerCount ?? 10} onChange={(e) => updateConfig({ registerCount: parseInt(e.target.value) || 10 })} style={inputStyle} />
-                      </div>
-                    </div>
-                    <div style={{ marginBottom: 10 }}>
-                      <label style={labelStyle}>Poll Interval (ms)</label>
-                      <input type="number" value={config.pollInterval ?? 1000} onChange={(e) => updateConfig({ pollInterval: parseInt(e.target.value) || 1000 })} style={inputStyle} />
-                    </div>
-                  </>
-                )}
-                {selectedMethod === 'opcua' && (
-                  <div style={{ marginBottom: 10 }}>
-                    <label style={labelStyle}>Node ID</label>
-                    <input
-                      type="text"
-                      value={config.nodeId ?? ''}
-                      onChange={(e) => updateConfig({ nodeId: e.target.value })}
-                      placeholder="ns=2;s=Temperature"
-                      style={inputStyle}
-                    />
-                  </div>
-                )}
-              </>
-            )}
-
-            {selectedMethod === 'rest_api' && (
-              <>
-                <div style={{ marginBottom: 10 }}>
-                  <label style={labelStyle}>API Endpoint URL</label>
-                  <input
-                    type="text"
-                    value={config.endpoint ?? ''}
-                    onChange={(e) => updateConfig({ endpoint: e.target.value })}
-                    placeholder="http://192.168.1.100/api/sensors"
-                    style={inputStyle}
-                  />
-                </div>
-                <div style={{ marginBottom: 10 }}>
-                  <label style={labelStyle}>Poll Interval (ms)</label>
-                  <input
-                    type="number"
-                    value={config.pollInterval ?? 2000}
-                    onChange={(e) => updateConfig({ pollInterval: parseInt(e.target.value) || 2000 })}
-                    style={inputStyle}
-                  />
-                </div>
-              </>
-            )}
-
-            {/* Auto reconnect */}
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12,
-              padding: '8px 10px', background: '#060b14', borderRadius: 4,
-              border: '1px solid #1e2d45',
-            }}>
-              <input
-                type="checkbox"
-                checked={config.autoReconnect ?? true}
-                onChange={(e) => updateConfig({ autoReconnect: e.target.checked })}
-                id="autoReconnect"
-              />
-              <label htmlFor="autoReconnect" style={{ fontSize: 11, color: '#94a3b8', cursor: 'pointer' }}>
-                Auto-Reconnect on disconnect
-              </label>
-            </div>
-
-            {/* Save button */}
-            <button
-              className="btn-secondary"
-              onClick={handleSave}
-              disabled={saving || !configName.trim()}
-              style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, opacity: !configName.trim() || saving ? 0.5 : 1 }}
-            >
-              <Save size={13} />
-              {saving ? 'Saving...' : 'Save Configuration'}
-            </button>
-          </div>
-
-          {/* Saved configurations */}
-          <div style={{
-            borderTop: '1px solid #1e2d45', maxHeight: 200, overflowY: 'auto',
-            flexShrink: 0,
-          }}>
-            <div style={{
-              padding: '8px 16px', borderBottom: '1px solid #1e2d45',
-              fontSize: 10, fontWeight: 700, color: '#94a3b8', letterSpacing: '1px',
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            }}>
-              SAVED CONFIGURATIONS
-              <button onClick={refreshSettings} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b' }}>
-                <RefreshCw size={11} />
-              </button>
-            </div>
-            {settings.length === 0 ? (
-              <div style={{ padding: '12px 16px', fontSize: 10, color: '#64748b' }}>
-                No saved configurations
               </div>
-            ) : (
-              settings.map((setting) => {
-                const Icon = METHOD_ICONS[setting.method];
-                const isActive = activeSetting?.id === setting.id;
-                return (
-                  <div
-                    key={setting.id}
-                    onClick={() => handleActivate(setting.id)}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 8,
-                      padding: '8px 16px', cursor: 'pointer',
-                      borderBottom: '1px solid #111827',
-                      background: isActive ? '#3b82f610' : 'transparent',
-                      borderLeft: isActive ? '2px solid #3b82f6' : '2px solid transparent',
-                    }}
-                  >
-                    <Icon size={13} color={isActive ? '#3b82f6' : '#64748b'} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 11, fontWeight: 600, color: isActive ? '#e2e8f0' : '#94a3b8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        {setting.name}
-                      </div>
-                      <div style={{ fontSize: 9, color: '#64748b' }}>
-                        {METHOD_LABELS[setting.method]}
-                        {setting.config.host ? ` · ${setting.config.host}:${setting.config.port}` : ''}
-                      </div>
+
+              {/* USB Serial */}
+              {selectedMethod === 'usb_serial' && (
+                <>
+                  <div>
+                    <label style={labelStyle}>COM PORT</label>
+                    <div className="flex gap-1.5">
+                      <select value={config.port} onChange={(e) => setConfig((p) => ({ ...p, port: e.target.value }))} style={inputStyle}>
+                        <option value="">Select port…</option>
+                        {availablePorts.map((p) => <option key={p} value={p}>{p}</option>)}
+                      </select>
+                      <button type="button" className="btn-secondary flex items-center justify-center" style={{ width: 32, height: 28, flexShrink: 0 }} onClick={refreshPorts} title="Refresh ports">
+                        <RefreshCw size={12} />
+                      </button>
                     </div>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); handleDelete(setting.id); }}
-                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', padding: 4 }}
-                    >
-                      <Trash2 size={12} />
-                    </button>
                   </div>
-                );
-              })
-            )}
+                  <div>
+                    <label style={labelStyle}>BAUD RATE</label>
+                    <select value={config.baudRate} onChange={(e) => setConfig((p) => ({ ...p, baudRate: parseInt(e.target.value, 10) }))} style={inputStyle}>
+                      {baudRates.map((b) => <option key={b} value={b}>{b}</option>)}
+                    </select>
+                  </div>
+                </>
+              )}
+
+              {/* Wi-Fi */}
+              {selectedMethod === 'wifi' && (
+                <>
+                  <div>
+                    <label style={labelStyle}>IP ADDRESS</label>
+                    <input type="text" placeholder="192.168.1.100" value={config.ipAddress ?? ''} onChange={(e) => setConfig((p) => ({ ...p, ipAddress: e.target.value }))} style={inputStyle} />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>PORT</label>
+                    <input type="number" placeholder="80" value={config.wifiPort ?? 80} onChange={(e) => setConfig((p) => ({ ...p, wifiPort: parseInt(e.target.value, 10) || 80 }))} style={inputStyle} />
+                  </div>
+                </>
+              )}
+
+              {/* MQTT */}
+              {selectedMethod === 'mqtt' && (
+                <>
+                  <div>
+                    <label style={labelStyle}>BROKER</label>
+                    <input type="text" placeholder="broker.hivemq.com" value={config.broker ?? ''} onChange={(e) => setConfig((p) => ({ ...p, broker: e.target.value }))} style={inputStyle} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label style={labelStyle}>PORT</label>
+                      <input type="number" placeholder="1883" value={config.mqttPort ?? 1883} onChange={(e) => setConfig((p) => ({ ...p, mqttPort: parseInt(e.target.value, 10) || 1883 }))} style={inputStyle} />
+                    </div>
+                    <div>
+                      <label style={labelStyle}>TOPIC</label>
+                      <input type="text" placeholder="veltrix/data" value={config.topic ?? ''} onChange={(e) => setConfig((p) => ({ ...p, topic: e.target.value }))} style={inputStyle} />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label style={labelStyle}>USERNAME</label>
+                      <input type="text" value={config.username ?? ''} onChange={(e) => setConfig((p) => ({ ...p, username: e.target.value }))} style={inputStyle} />
+                    </div>
+                    <div>
+                      <label style={labelStyle}>PASSWORD</label>
+                      <input type="password" value={config.password ?? ''} onChange={(e) => setConfig((p) => ({ ...p, password: e.target.value }))} style={inputStyle} />
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-1.5 cursor-pointer text-[11px] text-slate-300">
+                    <input type="checkbox" checked={config.ssl ?? false} onChange={(e) => setConfig((p) => ({ ...p, ssl: e.target.checked }))} /> SSL / TLS
+                  </label>
+                </>
+              )}
+
+              {/* REST API */}
+              {selectedMethod === 'rest_api' && (
+                <>
+                  <div>
+                    <label style={labelStyle}>ENDPOINT URL</label>
+                    <input type="text" placeholder="https://api.example.com/data" value={config.endpointUrl ?? ''} onChange={(e) => setConfig((p) => ({ ...p, endpointUrl: e.target.value }))} style={inputStyle} />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>AUTH TYPE</label>
+                    <select value={config.authType ?? 'none'} onChange={(e) => setConfig((p) => ({ ...p, authType: e.target.value as CommConfig['authType'] }))} style={inputStyle}>
+                      {authTypes.map((a) => <option key={a.key} value={a.key}>{a.label}</option>)}
+                    </select>
+                  </div>
+                  {config.authType && config.authType !== 'none' && (
+                    <div>
+                      <label style={labelStyle}>{config.authType === 'bearer' ? 'BEARER TOKEN' : config.authType === 'apikey' ? 'API KEY' : 'PASSWORD'}</label>
+                      <input type={config.authType === 'basic' ? 'password' : 'text'} value={config.apiKey ?? ''} onChange={(e) => setConfig((p) => ({ ...p, apiKey: e.target.value }))} style={inputStyle} />
+                    </div>
+                  )}
+                  <div>
+                    <label style={labelStyle}>POLL INTERVAL (seconds)</label>
+                    <input type="number" min={1} placeholder="2" value={config.pollInterval ?? 2} onChange={(e) => setConfig((p) => ({ ...p, pollInterval: parseInt(e.target.value, 10) || 2 }))} style={inputStyle} />
+                  </div>
+                </>
+              )}
+
+              {/* Modbus TCP */}
+              {selectedMethod === 'modbus_tcp' && (
+                <>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label style={labelStyle}>IP ADDRESS</label>
+                      <input type="text" placeholder="192.168.1.50" value={config.ipAddress ?? ''} onChange={(e) => setConfig((p) => ({ ...p, ipAddress: e.target.value }))} style={inputStyle} />
+                    </div>
+                    <div>
+                      <label style={labelStyle}>PORT</label>
+                      <input type="number" placeholder="502" value={config.wifiPort ?? 502} onChange={(e) => setConfig((p) => ({ ...p, wifiPort: parseInt(e.target.value, 10) || 502 }))} style={inputStyle} />
+                    </div>
+                  </div>
+                  <div>
+                    <label style={labelStyle}>SLAVE ID</label>
+                    <input type="number" min={1} placeholder="1" value={config.slaveId ?? 1} onChange={(e) => setConfig((p) => ({ ...p, slaveId: parseInt(e.target.value, 10) || 1 }))} style={inputStyle} />
+                  </div>
+                  {/* Register mapping */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label style={{ ...labelStyle, marginBottom: 0 }}>REGISTER MAPPING</label>
+                      <button type="button" className="btn-secondary flex items-center gap-1" style={{ height: 20, padding: '0 6px', fontSize: 9 }} onClick={() => setConfig((p) => ({ ...p, registerMap: [...(p.registerMap ?? []), { address: 40001, name: '', type: 'float' }] }))}>
+                        <Plus size={10} /> Add Row
+                      </button>
+                    </div>
+                    <div className="flex flex-col gap-1" style={{ maxHeight: 140, overflowY: 'auto' }}>
+                      {(config.registerMap ?? []).map((reg, i) => (
+                        <div key={i} className="flex items-center gap-1">
+                          <input type="number" placeholder="Addr" value={reg.address} onChange={(e) => setConfig((p) => { const map = [...(p.registerMap ?? [])]; map[i] = { ...map[i], address: parseInt(e.target.value, 10) || 0 }; return { ...p, registerMap: map }; })} style={{ ...inputStyle, width: 60, flexShrink: 0 }} />
+                          <input type="text" placeholder="name" value={reg.name} onChange={(e) => setConfig((p) => { const map = [...(p.registerMap ?? [])]; map[i] = { ...map[i], name: e.target.value }; return { ...p, registerMap: map }; })} style={inputStyle} />
+                          <select value={reg.type} onChange={(e) => setConfig((p) => { const map = [...(p.registerMap ?? [])]; map[i] = { ...map[i], type: e.target.value }; return { ...p, registerMap: map }; })} style={{ ...inputStyle, width: 64, flexShrink: 0 }}>
+                            <option value="float">float</option>
+                            <option value="int16">int16</option>
+                            <option value="int32">int32</option>
+                            <option value="uint16">uint16</option>
+                            <option value="bool">bool</option>
+                          </select>
+                          <button type="button" className="text-slate-500 hover:text-red-400 flex-shrink-0" onClick={() => setConfig((p) => ({ ...p, registerMap: (p.registerMap ?? []).filter((_, idx) => idx !== i) }))}>
+                            <Trash2 size={11} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* OPC UA */}
+              {selectedMethod === 'opcua' && (
+                <>
+                  <div>
+                    <label style={labelStyle}>SERVER URL</label>
+                    <input type="text" placeholder="opc.tcp://localhost:4840" value={config.serverUrl ?? ''} onChange={(e) => setConfig((p) => ({ ...p, serverUrl: e.target.value }))} style={inputStyle} />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>NODE ID</label>
+                    <input type="text" placeholder="ns=2;s=Temperature" value={config.nodeId ?? ''} onChange={(e) => setConfig((p) => ({ ...p, nodeId: e.target.value }))} style={inputStyle} />
+                  </div>
+                </>
+              )}
+
+              {/* Common: auto-reconnect + machine selector */}
+              {selectedMethod !== 'rest_api' && (
+                <label className="flex items-center gap-1.5 cursor-pointer text-[11px] text-slate-300">
+                  <input type="checkbox" checked={config.autoReconnect ?? false} onChange={(e) => setConfig((p) => ({ ...p, autoReconnect: e.target.checked }))} /> Auto-reconnect
+                </label>
+              )}
+              <div>
+                <label style={labelStyle}>ASSIGN TO MACHINE</label>
+                <select value={config.machineId ?? ''} onChange={(e) => setConfig((p) => ({ ...p, machineId: e.target.value || undefined }))} style={inputStyle}>
+                  <option value="">— None —</option>
+                  {machines.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                </select>
+              </div>
+
+              {/* Save / cancel */}
+              <div className="flex items-center gap-2 pt-1">
+                <button type="submit" className="btn-monitor flex items-center justify-center gap-1.5" style={{ height: 30, flex: 1, opacity: saving ? 0.7 : 1 }} disabled={saving}>
+                  {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />} {editingId ? 'Update' : 'Save Configuration'}
+                </button>
+                <button type="button" className="btn-secondary flex items-center gap-1" style={{ height: 30 }} onClick={() => { setSelectedMethod(null); setEditingId(null); setConfig({ ...emptyConfig }); }}>
+                  <X size={13} /> Cancel
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* Saved configs list */}
+          <div className="flex flex-col flex-1">
+            <div className="flex items-center gap-1.5 px-3 py-2" style={{ borderBottom: '1px solid #1e2d45' }}>
+              <Database size={12} className="text-blue-400" />
+              <span className="text-[11px] font-semibold text-slate-200 tracking-wide">SAVED CONFIGURATIONS</span>
+              <span className="ml-auto px-1.5 py-0.5 text-[9px] text-slate-400" style={{ background: '#1a2540', border: '1px solid #2a3f60' }}>{settings.length}</span>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {settings.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-8 px-3 gap-2">
+                  <Database size={24} className="text-slate-600" />
+                  <span className="text-[10px] text-slate-500 text-center">No saved configurations.<br />Select a protocol above to create one.</span>
+                </div>
+              ) : (
+                <div className="flex flex-col">
+                  {settings.map((s, i) => {
+                    const meta = methodMeta[s.method];
+                    const st = statusOf(s, activeSetting?.id ?? null, activeStatus);
+                    const sc = statusConfig[st];
+                    const isActive = activeSetting?.id === s.id;
+                    return (
+                      <div key={s.id} className="flex flex-col gap-2 px-3 py-2.5" style={{ borderBottom: '1px solid #141e30', background: i % 2 === 0 ? 'transparent' : 'rgba(30,45,69,0.15)' }}>
+                        {/* Top row: icon + name + status */}
+                        <div className="flex items-center gap-2">
+                          <meta.Icon size={14} style={{ color: meta.color }} />
+                          <div className="flex flex-col min-w-0 flex-1">
+                            <span className="text-[11px] font-semibold text-slate-200 truncate">{s.name}</span>
+                            <span className="text-[9px] text-slate-500 truncate">{configSummary(s.method, s.config)}</span>
+                          </div>
+                          {/* Status badge */}
+                          <span className="flex items-center gap-1 px-1.5 py-0.5 flex-shrink-0" style={{ background: `${sc.color}1a`, border: `1px solid ${sc.color}40` }}>
+                            <span className={`flex-shrink-0 ${st === 'connected' ? 'status-dot-active' : st === 'connecting' ? 'animate-spin' : ''}`} style={{ width: 6, height: 6, borderRadius: '50%', background: sc.color }} />
+                            {sc.Icon && <sc.Icon size={9} style={{ color: sc.color }} />}
+                            <span className="text-[8px] font-semibold tracking-wide" style={{ color: sc.color }}>{sc.label.toUpperCase()}</span>
+                          </span>
+                        </div>
+                        {/* Action buttons */}
+                        <div className="flex items-center gap-1.5">
+                          {isActive && (st === 'connected' || st === 'connecting') ? (
+                            <button className="btn-danger flex items-center gap-1" style={{ height: 24, padding: '0 10px', fontSize: 10 }} onClick={disconnect}>
+                              <Square size={10} /> Disconnect
+                            </button>
+                          ) : (
+                            <button
+                              className="btn-monitor flex items-center gap-1"
+                              style={{ height: 24, padding: '0 10px', fontSize: 10, opacity: connectingId === s.id ? 0.7 : 1 }}
+                              onClick={() => handleConnect(s.id)}
+                              disabled={connectingId === s.id}
+                            >
+                              {connectingId === s.id ? <Loader2 size={10} className="animate-spin" /> : <Play size={10} />} Connect
+                            </button>
+                          )}
+                          <button className="btn-secondary flex items-center gap-1" style={{ height: 24, padding: '0 8px', fontSize: 10 }} onClick={() => startEdit(s)} title="Edit">
+                            <Edit2 size={10} /> Edit
+                          </button>
+                          <button className="btn-secondary flex items-center justify-center" style={{ height: 24, width: 26, fontSize: 10 }} onClick={() => handleDelete(s.id)} title="Delete">
+                            <Trash2 size={10} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
         {/* Right panel: live data viewer */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          {/* Data viewer header */}
-          <div style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            padding: '8px 16px', borderBottom: '1px solid #1e2d45',
-            background: 'linear-gradient(180deg, #0d1220 0%, #080d14 100%)',
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Activity size={14} color="#06b6d4" />
-              <span style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', letterSpacing: '1px' }}>
-                LIVE DATA VIEWER
+        <div className="flex-1 flex flex-col overflow-hidden" style={{ background: '#0b0f1a' }}>
+          {/* Header */}
+          <div className="flex items-center gap-2 px-4 py-2.5 flex-shrink-0" style={{ borderBottom: '1px solid #1e2d45' }}>
+            <Activity size={14} className="text-blue-400" />
+            <span className="text-xs font-semibold text-slate-200 tracking-wide">LIVE DATA STREAM</span>
+            <span className="px-2 py-0.5 text-[10px] font-semibold text-slate-300" style={{ background: '#1a2540', border: '1px solid #2a3f60' }}>
+              {packetCount} packets
+            </span>
+            {activeSetting && (
+              <span className="flex items-center gap-1 text-[10px] text-slate-400">
+                <span className={`flex-shrink-0 ${activeStatus === 'connected' ? 'status-dot-active' : activeStatus === 'connecting' ? 'animate-spin' : ''}`} style={{ width: 6, height: 6, borderRadius: '50%', background: statusConfig[activeStatus].color }} />
+                {methodMeta[activeSetting.method].label}
               </span>
-              <span style={{
-                fontSize: 9, fontWeight: 700, color: '#06b6d4',
-                background: '#06b6d420', padding: '2px 6px', borderRadius: 8,
-              }}>
-                {dataBuffer.length} packets
-              </span>
-            </div>
-            <button
-              className="btn-secondary"
-              onClick={clearBuffer}
-              style={{ fontSize: 10, padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 4 }}
-            >
-              <Trash2 size={11} />
-              Clear
+            )}
+            <button className="btn-secondary flex items-center gap-1 ml-auto" style={{ height: 26, padding: '0 10px', fontSize: 10 }} onClick={clearBuffer} disabled={packetCount === 0}>
+              <Trash2 size={11} /> Clear
             </button>
           </div>
 
-          {/* Latest reading summary */}
-          {incomingData.length > 0 && (
-            <div style={{
-              display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
-              gap: 8, padding: '12px 16px', borderBottom: '1px solid #1e2d45',
-            }}>
-              {(() => {
-                const last = incomingData[incomingData.length - 1];
-                const p = last.parsed;
-                return (
-                  <>
-                    {p.temperature !== undefined && <DataChip label="Temperature" value={`${p.temperature.toFixed(1)}°C`} color="#f97316" />}
-                    {p.rmsX !== undefined && <DataChip label="RMS X" value={p.rmsX.toFixed(3)} color="#3b82f6" />}
-                    {p.rmsY !== undefined && <DataChip label="RMS Y" value={p.rmsY.toFixed(3)} color="#06b6d4" />}
-                    {p.current !== undefined && <DataChip label="Current" value={`${p.current.toFixed(2)}A`} color="#eab308" />}
-                    {p.rpm !== undefined && <DataChip label="RPM" value={String(p.rpm)} color="#22d3ee" />}
-                    {p.voltage !== undefined && <DataChip label="Voltage" value={`${p.voltage.toFixed(1)}V`} color="#a78bfa" />}
-                  </>
-                );
-              })()}
-            </div>
-          )}
-
-          {/* Data stream */}
-          <div style={{ flex: 1, overflowY: 'auto', padding: '8px 16px' }}>
-            {incomingData.length === 0 ? (
-              <div style={{ textAlign: 'center', color: '#64748b', fontSize: 12, padding: 40 }}>
-                <Activity size={32} color="#1e2d45" style={{ margin: '0 auto 12px', display: 'block' }} />
-                No data received. Select a protocol, configure, and click Connect.
+          <div className="flex-1 overflow-hidden flex flex-col">
+            {packetCount === 0 ? (
+              <div className="flex flex-col items-center justify-center flex-1 gap-3">
+                <Activity size={36} className="text-slate-600" />
+                <span className="text-sm text-slate-500">Waiting for data…</span>
+                <span className="text-[10px] text-slate-600">Connect a configuration to start receiving packets.</span>
               </div>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {[...incomingData].reverse().map((entry, i) => (
-                  <div
-                    key={`${entry.timestamp}-${i}`}
-                    style={{
-                      padding: '6px 10px', background: '#060b14',
-                      border: '1px solid #111827', borderRadius: 4,
-                      fontSize: 10, fontFamily: 'monospace',
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-                      <span style={{ color: '#64748b', fontSize: 9 }}>
-                        {new Date(entry.timestamp).toLocaleTimeString('en-US', { hour12: false })}
-                      </span>
-                      <span style={{
-                        fontSize: 8, fontWeight: 700, color: '#3b82f6',
-                        background: '#3b82f620', padding: '1px 4px', borderRadius: 3,
-                      }}>
-                        {METHOD_LABELS[entry.method]}
-                      </span>
+              <div className="flex-1 flex overflow-hidden">
+                {/* Packet list */}
+                <div className="flex-1 overflow-y-auto" style={{ borderRight: selPacket ? '1px solid #1e2d45' : 'none' }}>
+                  {incomingData.map((pkt, i) => {
+                    const meta = methodMeta[pkt.source];
+                    const p = pkt.parsed;
+                    const isSelected = selectedPacket === i;
+                    return (
+                      <button
+                        key={i}
+                        onClick={() => setSelectedPacket(i)}
+                        className="w-full text-left flex items-start gap-2 px-3 py-2 transition-all"
+                        style={{
+                          borderBottom: '1px solid #141e30',
+                          background: isSelected ? 'rgba(59,130,246,0.12)' : i % 2 === 0 ? 'transparent' : 'rgba(30,45,69,0.15)',
+                          borderLeft: isSelected ? '2px solid #3b82f6' : '2px solid transparent',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <meta.Icon size={12} style={{ color: meta.color, marginTop: 2, flexShrink: 0 }} />
+                        <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] text-slate-500">{fmtTime(pkt.timestamp)}</span>
+                            <span className="text-[9px] font-semibold tracking-wide" style={{ color: meta.color }}>{meta.label}</span>
+                          </div>
+                          {/* Parsed values */}
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {p?.temperature != null && <span className="text-[10px] val-orange font-semibold">{p.temperature.toFixed(1)}°C</span>}
+                            {p?.current != null && <span className="text-[10px] val-yellow font-semibold">{p.current.toFixed(2)}A</span>}
+                            {p?.rpm != null && <span className="text-[10px] val-cyan font-semibold">{p.rpm}rpm</span>}
+                            {p?.rmsX != null && <span className="text-[10px] val-blue font-semibold">X{p.rmsX.toFixed(2)}</span>}
+                            {p?.rmsY != null && <span className="text-[10px] val-cyan font-semibold">Y{p.rmsY.toFixed(2)}</span>}
+                            {p?.voltage != null && <span className="text-[10px] val-blue font-semibold">{p.voltage.toFixed(1)}V</span>}
+                            {!p || (p.temperature == null && p.current == null && p.rpm == null && p.rmsX == null && p.voltage == null) && (
+                              <span className="text-[9px] text-slate-500">raw payload</span>
+                            )}
+                          </div>
+                        </div>
+                        {isSelected && <Eye size={11} className="text-blue-400 flex-shrink-0 mt-1" />}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* JSON viewer */}
+                {selPacket && (
+                  <div className="flex flex-col flex-shrink-0" style={{ width: 360, maxWidth: '50%' }}>
+                    <div className="flex items-center gap-1.5 px-3 py-2" style={{ borderBottom: '1px solid #1e2d45', background: '#0d1220' }}>
+                      <Eye size={12} className="text-blue-400" />
+                      <span className="text-[10px] font-semibold text-slate-200 tracking-wide">RAW JSON</span>
+                      <button className="ml-auto text-slate-500 hover:text-slate-300" onClick={() => setSelectedPacket(null)}><X size={12} /></button>
                     </div>
-                    <div style={{ color: '#cbd5e1', wordBreak: 'break-all', lineHeight: 1.3 }}>
-                      {entry.raw.length > 200 ? entry.raw.slice(0, 200) + '...' : entry.raw}
+                    <div className="flex-1 overflow-auto p-3">
+                      <pre className="text-[10px] leading-relaxed text-slate-300" style={{ fontFamily: 'Consolas, "Courier New", monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0 }}>
+                        {JSON.stringify(selPacket.raw, null, 2)}
+                      </pre>
                     </div>
-                    {Object.keys(entry.parsed).length > 0 && (
-                      <div style={{ display: 'flex', gap: 8, marginTop: 3, flexWrap: 'wrap' }}>
-                        {Object.entries(entry.parsed).map(([k, v]) => (
-                          <span key={k} style={{ fontSize: 9, color: '#22c55e' }}>
-                            {k}={typeof v === 'number' ? v.toFixed(2) : v}
-                          </span>
-                        ))}
+                    {selPacket.parsed && (
+                      <div className="p-3" style={{ borderTop: '1px solid #1e2d45', background: '#0d1220' }}>
+                        <span className="text-[9px] font-semibold text-slate-400 tracking-wide block mb-1.5">PARSED VALUES</span>
+                        <div className="grid grid-cols-2 gap-1">
+                          {Object.entries(selPacket.parsed).filter(([, v]) => v != null).map(([k, v]) => (
+                            <div key={k} className="flex justify-between text-[10px] px-1.5 py-1" style={{ background: '#0e1726', border: '1px solid #1e2d45' }}>
+                              <span className="text-slate-500">{k}</span>
+                              <span className="val-cyan font-semibold">{typeof v === 'number' ? v.toFixed(2) : String(v)}</span>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     )}
                   </div>
-                ))}
+                )}
               </div>
             )}
           </div>
         </div>
       </div>
-    </div>
-  );
-}
-
-function DataChip({ label, value, color }: { label: string; value: string; color: string }) {
-  return (
-    <div style={{
-      padding: '6px 10px', background: '#060b14',
-      border: '1px solid #1e2d45', borderRadius: 4,
-      display: 'flex', flexDirection: 'column', gap: 2,
-    }}>
-      <span style={{ fontSize: 8, color: '#64748b', fontWeight: 600, letterSpacing: '0.3px' }}>
-        {label.toUpperCase()}
-      </span>
-      <span style={{ fontSize: 14, fontWeight: 700, color }}>{value}</span>
     </div>
   );
 }

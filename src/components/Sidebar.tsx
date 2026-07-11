@@ -1,123 +1,102 @@
-import { Plus, Cpu, CircleDot } from 'lucide-react';
+import { Cpu, Plus, Thermometer, Zap, Activity } from 'lucide-react';
 import { useMonitoring } from '../contexts/MonitoringContext';
+import type { MachineStatus } from '../types';
 
-interface SidebarProps {
+interface Props {
   onAddMachine: () => void;
-  onSaveSettings: () => void;
+  onSaveSettings?: () => void;
 }
 
-export function Sidebar({ onAddMachine }: SidebarProps) {
+const statusColor: Record<MachineStatus, string> = {
+  online: '#22c55e',
+  offline: '#64748b',
+  warning: '#eab308',
+  critical: '#ef4444',
+};
+
+/**
+ * Machine-list sidebar. Lists every machine with a colored status dot, name
+ * and location; the active machine is highlighted with a green left border and
+ * shows live T / I / V metrics. An "Add Machine" button anchors the bottom.
+ */
+export function Sidebar({ onAddMachine }: Props) {
   const { machines, selectedMachine, selectMachine, temperature, currentVal, rmsX, rmsY } = useMonitoring();
 
   return (
     <div className="sidebar">
-      {/* Machine list header */}
-      <div style={{
-        padding: '8px 12px',
-        borderBottom: '1px solid #1e2d45',
-        display: 'flex', alignItems: 'center', gap: 6,
-        background: 'linear-gradient(180deg, #111827 0%, #0d1220 100%)',
-      }}>
-        <Cpu size={13} color="#3b82f6" />
-        <span style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', letterSpacing: '1px' }}>
-          MACHINES
-        </span>
-        <span style={{
-          fontSize: 9, fontWeight: 700, color: '#3b82f6',
-          background: '#3b82f620', padding: '1px 6px', borderRadius: 8,
-          marginLeft: 'auto',
-        }}>
+      {/* Header */}
+      <div className="flex items-center gap-2 px-3 py-2.5" style={{ borderBottom: '1px solid #1e2d45' }}>
+        <Cpu size={13} className="text-blue-400" />
+        <span className="text-xs font-semibold text-slate-200 tracking-wide">MACHINES</span>
+        <span className="ml-auto px-1.5 py-0.5 text-[9px] font-semibold text-slate-300" style={{ background: '#1a2540', border: '1px solid #2a3f60' }}>
           {machines.length}
         </span>
       </div>
 
       {/* Machine list */}
-      <div style={{ flex: 1, overflowY: 'auto' }}>
+      <div className="flex-1 overflow-y-auto">
         {machines.length === 0 ? (
-          <div style={{
-            padding: 20, textAlign: 'center', color: '#64748b', fontSize: 11,
-          }}>
-            No machines yet.
-            <br />
-            Click "Add Machine" below.
+          <div className="flex flex-col items-center justify-center px-3 py-8 gap-2">
+            <Cpu size={22} className="text-slate-600" />
+            <span className="text-[10px] text-slate-500 text-center">No machines yet.<br />Add one to begin monitoring.</span>
           </div>
         ) : (
-          machines.map((machine) => {
-            const isActive = selectedMachine?.id === machine.id;
-            const statusColor =
-              machine.status === 'online' ? '#22c55e' :
-              machine.status === 'warning' ? '#eab308' :
-              machine.status === 'critical' ? '#ef4444' : '#64748b';
-
+          machines.map((m) => {
+            const active = selectedMachine?.id === m.id;
+            const color = statusColor[m.status] ?? statusColor.offline;
             return (
               <div
-                key={machine.id}
-                onClick={() => selectMachine(machine.id)}
-                className={isActive ? 'machine-active' : ''}
+                key={m.id}
+                onClick={() => selectMachine(m.id)}
+                className={active ? 'machine-active cursor-pointer' : 'cursor-pointer'}
                 style={{
-                  padding: '8px 12px',
-                  cursor: 'pointer',
-                  borderBottom: '1px solid #111827',
-                  display: 'flex', alignItems: 'center', gap: 8,
-                  transition: 'background 0.1s',
-                  background: isActive ? undefined : 'transparent',
+                  padding: '8px 10px',
+                  borderBottom: '1px solid #141e30',
+                  transition: 'background 0.15s',
+                  ...(active ? {} : {}),
                 }}
-                onMouseEnter={(e) => {
-                  if (!isActive) e.currentTarget.style.background = '#111827';
-                }}
-                onMouseLeave={(e) => {
-                  if (!isActive) e.currentTarget.style.background = 'transparent';
-                }}
+                onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'rgba(30,45,69,0.35)'; }}
+                onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent'; }}
               >
-                {/* Status indicator */}
-                <CircleDot
-                  size={10}
-                  color={statusColor}
-                  className={isActive ? 'status-dot-active' : ''}
-                  style={{ flexShrink: 0 }}
-                />
-
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{
-                    fontSize: 11, fontWeight: 600,
-                    color: isActive ? '#e2e8f0' : '#94a3b8',
-                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                  }}>
-                    {machine.name}
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`flex-shrink-0 ${m.status === 'online' ? 'status-dot-active' : ''}`}
+                    style={{ width: 7, height: 7, borderRadius: '50%', background: color, boxShadow: `0 0 5px ${color}` }}
+                  />
+                  <div className="flex flex-col min-w-0 flex-1">
+                    <span className="text-[11px] font-semibold text-slate-200 truncate">{m.name}</span>
+                    {m.location && <span className="text-[9px] text-slate-500 truncate">{m.location}</span>}
                   </div>
-                  <div style={{ fontSize: 9, color: '#64748b', marginTop: 1 }}>
-                    {machine.location || '—'}
-                  </div>
-                  {isActive && (
-                    <div style={{
-                      display: 'flex', gap: 8, marginTop: 4,
-                      fontSize: 8.5, color: '#64748b',
-                    }}>
-                      <span><span className="val-orange">T</span> {temperature.toFixed(0)}°</span>
-                      <span><span className="val-yellow">I</span> {currentVal.toFixed(1)}A</span>
-                      <span><span className="val-blue">V</span> {((rmsX + rmsY) / 2).toFixed(2)}</span>
-                    </div>
-                  )}
                 </div>
+
+                {/* Live metrics for the active machine */}
+                {active && (
+                  <div className="flex items-center gap-3 mt-2 ml-4">
+                    <div className="flex items-center gap-1" title="Temperature">
+                      <Thermometer size={10} className="text-orange-400" />
+                      <span className="text-[10px] val-orange font-semibold">{temperature.toFixed(1)}°</span>
+                    </div>
+                    <div className="flex items-center gap-1" title="Current">
+                      <Zap size={10} className="text-yellow-400" />
+                      <span className="text-[10px] val-yellow font-semibold">{currentVal.toFixed(2)}A</span>
+                    </div>
+                    <div className="flex items-center gap-1" title="Vibration RMS">
+                      <Activity size={10} className="text-cyan-400" />
+                      <span className="text-[10px] val-cyan font-semibold">{((rmsX + rmsY) / 2).toFixed(2)}</span>
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })
         )}
       </div>
 
-      {/* Add Machine button */}
-      <div style={{
-        padding: '10px 12px',
-        borderTop: '1px solid #1e2d45',
-        flexShrink: 0,
-      }}>
-        <button
-          onClick={onAddMachine}
-          className="btn-secondary"
-          style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
-        >
+      {/* Footer — add machine */}
+      <div className="p-2" style={{ borderTop: '1px solid #1e2d45' }}>
+        <button className="btn-secondary w-full flex items-center justify-center gap-1.5" onClick={onAddMachine}>
           <Plus size={13} />
-          Add Machine
+          <span>Add Machine</span>
         </button>
       </div>
     </div>

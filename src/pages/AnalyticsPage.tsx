@@ -1,313 +1,249 @@
-import { useState, useEffect, useMemo } from 'react';
-import { TrendingUp, Download, Thermometer, Zap, Activity, Cpu, Gauge, Clock, TriangleAlert as AlertTriangle } from 'lucide-react';
+import { useEffect, useState, useMemo } from 'react';
+import {
+  TrendingUp, Download, Cpu, Bell, Activity, AlertTriangle, Thermometer, Zap, Gauge,
+  Loader2,
+} from 'lucide-react';
 import { useMonitoring } from '../contexts/MonitoringContext';
 import { supabase } from '../lib/supabase';
-import { useAuth } from '../contexts/AuthContext';
-import type { Machine, SensorSnapshot, MachineStatus } from '../types';
+import { useToast } from '../components/Toast';
+import type { MachineHealth, SensorSnapshot, HealthStatus } from '../types';
 
-const STATUS_COLORS: Record<MachineStatus, string> = {
-  online: '#22c55e',
-  offline: '#64748b',
-  warning: '#eab308',
-  critical: '#ef4444',
+const statusColor: Record<HealthStatus, string> = {
+  healthy: '#4ade80',
+  warning: '#facc15',
+  critical: '#f87171',
 };
 
-export function AnalyticsPage() {
-  const { machines } = useMonitoring();
-  const { user } = useAuth();
+function fmtTime(iso: string) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString(undefined, { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+interface Props {}
+
+/**
+ * Analytics & reports page. Aggregates KPIs from machines/alerts, draws SVG
+ * trend charts (temperature, current, vibration) from `sensor_snapshots`, and
+ * lists per-machine health from the `machine_health` table. CSV export of all
+ * snapshots.
+ */
+export function AnalyticsPage(_: Props) {
+  const { machines, recentAlerts } = useMonitoring();
+  const { toast } = useToast();
+
   const [snapshots, setSnapshots] = useState<SensorSnapshot[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [selectedMachineId, setSelectedMachineId] = useState<string>('all');
+  const [healthRows, setHealthRows] = useState<MachineHealth[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
-    if (!user) return;
-    setLoading(true);
-    let query = supabase
-      .from('sensor_snapshots')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('recorded_at', { ascending: false })
-      .limit(500);
-    if (selectedMachineId !== 'all') {
-      query = query.eq('machine_id', selectedMachineId);
-    }
-    query.then(({ data }) => {
-      setSnapshots((data as SensorSnapshot[]) ?? []);
+    let cancelled = false;
+    async function load() {
+      setLoading(true);
+      const [snapRes, healthRes] = await Promise.all([
+        supabase.from('sensor_snapshots').select('*').order('recorded_at', { ascending: false }).limit(500),
+        supabase.from('machine_health').select('*').order('updated_at', { ascending: false }),
+      ]);
+      if (cancelled) return;
+      if (snapRes.data) setSnapshots(snapRes.data as SensorSnapshot[]);
+      if (healthRes.data) setHealthRows(healthRes.data as MachineHealth[]);
       setLoading(false);
-    });
-  }, [user, selectedMachineId]);
-
-  // KPI calculations
-  const kpis = useMemo(() => {
-    if (snapshots.length === 0) {
-      return { avgTemp: 0, avgCurrent: 0, avgVib: 0, avgRpm: 0, maxTemp: 0, maxCurrent: 0, maxVib: 0, totalReadings: 0 };
     }
-    const temps = snapshots.map((s) => s.temperature);
-    const currents = snapshots.map((s) => s.current);
-    const vibs = snapshots.map((s) => s.vibration_rms);
-    const rpms = snapshots.map((s) => s.rpm);
-    return {
-      avgTemp: temps.reduce((a, b) => a + b, 0) / temps.length,
-      avgCurrent: currents.reduce((a, b) => a + b, 0) / currents.length,
-      avgVib: vibs.reduce((a, b) => a + b, 0) / vibs.length,
-      avgRpm: rpms.reduce((a, b) => a + b, 0) / rpms.length,
-      maxTemp: Math.max(...temps),
-      maxCurrent: Math.max(...currents),
-      maxVib: Math.max(...vibs),
-      totalReadings: snapshots.length,
-    };
+    load();
+    return () => { cancelled = true; };
+  }, []);
+
+  const machineName = (id: string) => machines.find((m) => m.id === id)?.name ?? 'Unknown';
+
+  // KPI summary
+  const avgHealth = useMemo(() => {
+    if (healthRows.length === 0) return 0;
+    return Math.round(healthRows.reduce((sum, h) => sum + (h.health_score ?? 100), 0) / healthRows.length);
+  }, [healthRows]);
+  const criticalCount = healthRows.filter((h) => h.status === 'critical').length;
+
+  // Build per-metric trend series (chronological, last 60 points)
+  const tempSeries = useMemo(() => {
+    return [...snapshots].reverse().slice(-60).map((s) => ({ t: new Date(s.recorded_at).getTime(), v: s.temperature }));
+  }, [snapshots]);
+  const currSeries = useMemo(() => {
+    return [...snapshots].reverse().slice(-60).map((s) => ({ t: new Date(s.recorded_at).getTime(), v: s.current }));
+  }, [snapshots]);
+  const vibSeries = useMemo(() => {
+    return [...snapshots].reverse().slice(-60).map((s) => ({ t: new Date(s.recorded_at).getTime(), v: s.vibration_rms }));
   }, [snapshots]);
 
-  // Trend data (reversed for chronological order)
-  const trendData = useMemo(() => {
-    return [...snapshots].reverse().slice(-100);
-  }, [snapshots]);
-
-  // Machine health summary
-  const machineHealth = useMemo(() => {
-    return machines.map((m) => {
-      const mSnaps = snapshots.filter((s) => s.machine_id === m.id);
-      if (mSnaps.length === 0) {
-        return { machine: m, avgTemp: 0, avgCurrent: 0, avgVib: 0, readings: 0, lastReading: null };
-      }
-      const sorted = [...mSnaps].sort((a, b) => new Date(b.recorded_at).getTime() - new Date(a.recorded_at).getTime());
-      return {
-        machine: m,
-        avgTemp: mSnaps.reduce((a, s) => a + s.temperature, 0) / mSnaps.length,
-        avgCurrent: mSnaps.reduce((a, s) => a + s.current, 0) / mSnaps.length,
-        avgVib: mSnaps.reduce((a, s) => a + s.vibration_rms, 0) / mSnaps.length,
-        readings: mSnaps.length,
-        lastReading: sorted[0]?.recorded_at ?? null,
-      };
-    });
-  }, [machines, snapshots]);
-
-  function exportCSV() {
-    if (snapshots.length === 0) return;
-    const headers = ['machine_id', 'temperature', 'vibration_rms', 'current', 'rpm', 'voltage', 'recorded_at'];
-    const rows = snapshots.map((s) =>
-      [s.machine_id, s.temperature, s.vibration_rms, s.current, s.rpm, s.voltage, s.recorded_at].join(',')
+  function renderTrend(data: { t: number; v: number }[], color: string, height: number, unit: string) {
+    const width = 600;
+    const padTop = 8; const padBottom = 8; const padL = 28;
+    const plotH = height - padTop - padBottom;
+    const pts = data;
+    if (pts.length === 0) {
+      return (
+        <div className="flex items-center justify-center" style={{ height, color: '#64748b', fontSize: 11 }}>
+          No data
+        </div>
+      );
+    }
+    let minV = Math.min(...pts.map((p) => p.v));
+    let maxV = Math.max(...pts.map((p) => p.v));
+    if (minV === maxV) { minV -= 1; maxV += 1; }
+    const pad = (maxV - minV) * 0.1; minV -= pad; maxV += pad;
+    const range = maxV - minV || 1;
+    const plotW = width - padL;
+    const mapX = (i: number) => pts.length > 1 ? padL + (i / (pts.length - 1)) * plotW : padL;
+    const mapY = (v: number) => padTop + plotH - ((v - minV) / range) * plotH;
+    const linePath = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${mapX(i).toFixed(2)} ${mapY(p.v).toFixed(2)}`).join(' ');
+    return (
+      <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" className="block">
+        {[0, 0.5, 1].map((f, i) => (
+          <line key={i} x1={padL} y1={padTop + plotH * f} x2={width} y2={padTop + plotH * f} className="chart-grid-line" />
+        ))}
+        <text x={2} y={padTop + 4} style={{ fontSize: 8, fill: '#64748b' }}>{maxV.toFixed(1)}</text>
+        <text x={2} y={padTop + plotH + 2} style={{ fontSize: 8, fill: '#64748b' }}>{minV.toFixed(1)}</text>
+        <path d={linePath} fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round" />
+        {pts.length > 0 && (
+          <circle cx={mapX(pts.length - 1)} cy={mapY(pts[pts.length - 1].v)} r={2.5} fill={color} />
+        )}
+      </svg>
     );
-    const csv = [headers.join(','), ...rows].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `veltrix_analytics_${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
   }
 
+  async function handleExportCSV() {
+    setExporting(true);
+    try {
+      const { data } = await supabase.from('sensor_snapshots').select('*').order('recorded_at', { ascending: false }).limit(5000);
+      const rows = (data ?? []) as SensorSnapshot[];
+      if (rows.length === 0) { toast('No data to export', 'info'); setExporting(false); return; }
+      const headers = ['id', 'machine_id', 'temperature', 'vibration_rms', 'current', 'rpm', 'voltage', 'recorded_at'];
+      const lines = [headers.join(',')];
+      for (const s of rows) {
+        const cells = [s.id, s.machine_id, s.temperature, s.vibration_rms, s.current, s.rpm, s.voltage, s.recorded_at]
+          .map((v) => { const c = String(v ?? ''); return c.includes(',') || c.includes('"') ? `"${c.replace(/"/g, '""')}"` : c; });
+        lines.push(cells.join(','));
+      }
+      const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'veltrix_analytics.csv'; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast(`Exported ${rows.length} records`, 'success');
+    } catch (err) {
+      toast('Export failed', 'error');
+    }
+    setExporting(false);
+  }
+
+  const kpis = [
+    { label: 'TOTAL MACHINES', value: machines.length, color: '#60a5fa', Icon: Cpu },
+    { label: 'TOTAL ALERTS', value: recentAlerts.length, color: '#facc15', Icon: Bell },
+    { label: 'AVG HEALTH', value: avgHealth, unit: '', color: statusColor[avgHealth > 70 ? 'healthy' : avgHealth >= 40 ? 'warning' : 'critical'], Icon: Activity },
+    { label: 'CRITICAL', value: criticalCount, color: '#f87171', Icon: AlertTriangle },
+  ];
+
+  const trendCards = [
+    { title: 'TEMPERATURE TREND', data: tempSeries, color: '#f97316', unit: '°C', Icon: Thermometer },
+    { title: 'CURRENT TREND', data: currSeries, color: '#eab308', unit: 'A', Icon: Zap },
+    { title: 'VIBRATION TREND', data: vibSeries, color: '#06b6d4', unit: 'mm/s', Icon: Activity },
+  ];
+
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div className="flex flex-col h-full" style={{ background: '#0b0f1a' }}>
       {/* Header */}
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '10px 16px', borderBottom: '1px solid #1e2d45',
-        background: 'linear-gradient(180deg, #0d1220 0%, #080d14 100%)',
-        flexShrink: 0,
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <TrendingUp size={18} color="#3b82f6" />
-          <span style={{ fontSize: 14, fontWeight: 700, color: '#e2e8f0', letterSpacing: '1px' }}>
-            ANALYTICS & REPORTS
-          </span>
-        </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <select
-            value={selectedMachineId}
-            onChange={(e) => setSelectedMachineId(e.target.value)}
-            style={{
-              background: '#060b14', border: '1px solid #1e2d45', color: '#e2e8f0',
-              padding: '5px 10px', borderRadius: 4, fontSize: 11, outline: 'none',
-            }}
-          >
-            <option value="all">All Machines</option>
-            {machines.map((m) => (
-              <option key={m.id} value={m.id}>{m.name}</option>
-            ))}
-          </select>
-          <button className="btn-monitor" onClick={exportCSV} disabled={snapshots.length === 0} style={{ display: 'flex', alignItems: 'center', gap: 6, opacity: snapshots.length === 0 ? 0.5 : 1 }}>
-            <Download size={13} />
-            Export CSV
-          </button>
-        </div>
+      <div className="flex items-center gap-3 px-4 py-3 flex-shrink-0" style={{ borderBottom: '1px solid #1e2d45', background: 'linear-gradient(180deg,#0d1525 0%,#080d14 100%)' }}>
+        <TrendingUp size={18} className="text-blue-400" />
+        <span className="text-sm font-bold text-slate-100 tracking-wide">ANALYTICS &amp; REPORTS</span>
+        <button className="btn-monitor flex items-center gap-1.5 ml-auto" style={{ height: 30, opacity: exporting ? 0.7 : 1 }} onClick={handleExportCSV} disabled={exporting}>
+          {exporting ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} Export CSV
+        </button>
       </div>
 
-      {/* Content */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
+      <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
         {loading ? (
-          <div style={{ textAlign: 'center', color: '#64748b', fontSize: 13, padding: 40 }}>Loading analytics data...</div>
-        ) : snapshots.length === 0 ? (
-          <div style={{ textAlign: 'center', color: '#64748b', fontSize: 13, padding: 40 }}>
-            <TrendingUp size={32} color="#1e2d45" style={{ margin: '0 auto 12px', display: 'block' }} />
-            No sensor data available yet. Start monitoring to collect data.
+          <div className="flex items-center justify-center py-16">
+            <Loader2 size={24} className="animate-spin text-blue-400" />
+            <span className="text-xs text-slate-400 ml-2">Loading analytics…</span>
           </div>
         ) : (
           <>
-            {/* KPI Summary Cards */}
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-              gap: 12, marginBottom: 16,
-            }}>
-              <KPICard icon={Thermometer} color="#f97316" label="Avg Temperature" value={`${kpis.avgTemp.toFixed(1)}°C`} sub={`Max: ${kpis.maxTemp.toFixed(1)}°C`} />
-              <KPICard icon={Zap} color="#eab308" label="Avg Current" value={`${kpis.avgCurrent.toFixed(2)}A`} sub={`Max: ${kpis.maxCurrent.toFixed(2)}A`} />
-              <KPICard icon={Activity} color="#3b82f6" label="Avg Vibration" value={`${kpis.avgVib.toFixed(3)}`} sub={`Max: ${kpis.maxVib.toFixed(3)}`} />
-              <KPICard icon={Gauge} color="#06b6d4" label="Avg RPM" value={`${Math.round(kpis.avgRpm)}`} sub="RPM" />
-              <KPICard icon={Clock} color="#22c55e" label="Total Readings" value={kpis.totalReadings.toLocaleString()} sub="records" />
-              <KPICard icon={Cpu} color="#8b5cf6" label="Active Machines" value={String(machines.length)} sub="configured" />
+            {/* KPI summary */}
+            <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+              {kpis.map((k) => (
+                <div key={k.label} className="panel p-3 flex flex-col gap-1">
+                  <div className="flex items-center gap-1.5">
+                    <k.Icon size={13} style={{ color: k.color }} />
+                    <span className="text-[10px] text-slate-400 tracking-wide">{k.label}</span>
+                  </div>
+                  <span className="text-2xl font-bold" style={{ color: k.color }}>{k.value}{k.unit ?? ''}</span>
+                </div>
+              ))}
             </div>
 
-            {/* Trend Charts */}
-            <div style={{
-              display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 16,
-            }}>
-              <TrendChart title="TEMPERATURE TREND" data={trendData.map((s, i) => ({ t: i, v: s.temperature }))} color="#f97316" unit="°C" />
-              <TrendChart title="CURRENT TREND" data={trendData.map((s, i) => ({ t: i, v: s.current }))} color="#eab308" unit="A" />
-              <TrendChart title="VIBRATION TREND" data={trendData.map((s, i) => ({ t: i, v: s.vibration_rms }))} color="#3b82f6" unit="" />
+            {/* Trend charts */}
+            <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+              {trendCards.map((c) => (
+                <div key={c.title} className="panel flex flex-col">
+                  <div className="flex items-center gap-2 px-3 py-2" style={{ borderBottom: '1px solid #1e2d45' }}>
+                    <c.Icon size={12} style={{ color: c.color }} />
+                    <span className="text-xs font-semibold text-slate-200 tracking-wide">{c.title}</span>
+                    <span className="ml-auto text-[10px] text-slate-500">{c.unit}</span>
+                  </div>
+                  <div className="chart-bg">{renderTrend(c.data, c.color, 140, c.unit)}</div>
+                </div>
+              ))}
             </div>
 
-            {/* Machine Health Table */}
-            <div className="panel" style={{ borderRadius: 6, overflow: 'hidden' }}>
-              <div style={{
-                padding: '8px 12px', borderBottom: '1px solid #1e2d45',
-                display: 'flex', alignItems: 'center', gap: 8,
-                background: 'linear-gradient(180deg, #111827 0%, #0d1220 100%)',
-              }}>
-                <Cpu size={13} color="#3b82f6" />
-                <span style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', letterSpacing: '1px' }}>
-                  MACHINE HEALTH SUMMARY
-                </span>
+            {/* Machine health table */}
+            <div className="panel flex flex-col">
+              <div className="flex items-center gap-2 px-3 py-2" style={{ borderBottom: '1px solid #1e2d45' }}>
+                <Gauge size={13} className="text-blue-400" />
+                <span className="text-xs font-semibold text-slate-200 tracking-wide">MACHINE HEALTH</span>
+                <span className="ml-auto text-[10px] text-slate-500">{healthRows.length} entries</span>
               </div>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid #1e2d45' }}>
-                    <th style={{ textAlign: 'left', padding: '8px 12px', color: '#94a3b8', fontWeight: 600, fontSize: 10, letterSpacing: '0.5px' }}>MACHINE</th>
-                    <th style={{ textAlign: 'left', padding: '8px 12px', color: '#94a3b8', fontWeight: 600, fontSize: 10, letterSpacing: '0.5px' }}>STATUS</th>
-                    <th style={{ textAlign: 'right', padding: '8px 12px', color: '#f97316', fontWeight: 600, fontSize: 10, letterSpacing: '0.5px' }}>AVG TEMP</th>
-                    <th style={{ textAlign: 'right', padding: '8px 12px', color: '#eab308', fontWeight: 600, fontSize: 10, letterSpacing: '0.5px' }}>AVG CURRENT</th>
-                    <th style={{ textAlign: 'right', padding: '8px 12px', color: '#3b82f6', fontWeight: 600, fontSize: 10, letterSpacing: '0.5px' }}>AVG VIBRATION</th>
-                    <th style={{ textAlign: 'right', padding: '8px 12px', color: '#94a3b8', fontWeight: 600, fontSize: 10, letterSpacing: '0.5px' }}>READINGS</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {machineHealth.map(({ machine, avgTemp, avgCurrent, avgVib, readings, lastReading }) => {
-                    const statusColor = STATUS_COLORS[machine.status];
-                    const tempExceeded = avgTemp > machine.temp_max * 0.8;
-                    const vibExceeded = avgVib > machine.rms_max * 0.8;
-                    return (
-                      <tr key={machine.id} style={{ borderBottom: '1px solid #111827' }}>
-                        <td style={{ padding: '7px 12px', color: '#e2e8f0', fontWeight: 600 }}>{machine.name}</td>
-                        <td style={{ padding: '7px 12px' }}>
-                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: statusColor, fontSize: 10, fontWeight: 600 }}>
-                            <div style={{ width: 6, height: 6, borderRadius: '50%', background: statusColor }} />
-                            {machine.status.toUpperCase()}
-                          </span>
-                        </td>
-                        <td style={{ padding: '7px 12px', textAlign: 'right', color: tempExceeded ? '#ef4444' : '#fb923c', fontWeight: 600 }}>
-                          {tempExceeded && <AlertTriangle size={9} style={{ display: 'inline', marginRight: 4 }} />}
-                          {avgTemp.toFixed(1)}°C
-                        </td>
-                        <td style={{ padding: '7px 12px', textAlign: 'right', color: '#facc15', fontWeight: 600 }}>{avgCurrent.toFixed(2)}A</td>
-                        <td style={{ padding: '7px 12px', textAlign: 'right', color: vibExceeded ? '#ef4444' : '#60a5fa', fontWeight: 600 }}>
-                          {vibExceeded && <AlertTriangle size={9} style={{ display: 'inline', marginRight: 4 }} />}
-                          {avgVib.toFixed(3)}
-                        </td>
-                        <td style={{ padding: '7px 12px', textAlign: 'right', color: '#94a3b8' }}>{readings}</td>
+              {healthRows.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-8 gap-2">
+                  <Gauge size={26} className="text-slate-600" />
+                  <span className="text-xs text-slate-500">No health records yet.</span>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full" style={{ borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ background: '#0f1726' }}>
+                        {['MACHINE', 'HEALTH', 'STATUS', 'TEMP', 'CURRENT', 'RPM', 'VIBRATION', 'UPDATED'].map((h) => (
+                          <th key={h} className="text-left px-3 py-2 text-[10px] font-semibold text-slate-400 tracking-wide" style={{ borderBottom: '1px solid #1e2d45' }}>{h}</th>
+                        ))}
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                    </thead>
+                    <tbody>
+                      {healthRows.map((h, i) => {
+                        const color = statusColor[h.status] ?? statusColor.healthy;
+                        return (
+                          <tr key={h.machine_id + i} style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(30,45,69,0.18)' }}>
+                            <td className="px-3 py-2 text-[11px] text-slate-200" style={{ borderBottom: '1px solid #141e30' }}>{machineName(h.machine_id)}</td>
+                            <td className="px-3 py-2" style={{ borderBottom: '1px solid #141e30' }}>
+                              <span className="text-[11px] font-bold" style={{ color }}>{h.health_score ?? 100}</span>
+                            </td>
+                            <td className="px-3 py-2" style={{ borderBottom: '1px solid #141e30' }}>
+                              <span className="px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide" style={{ background: `${color}1a`, color, border: `1px solid ${color}40` }}>{h.status}</span>
+                            </td>
+                            <td className="px-3 py-2 text-[11px] val-orange" style={{ borderBottom: '1px solid #141e30' }}>{h.temperature?.toFixed(1)}°</td>
+                            <td className="px-3 py-2 text-[11px] val-yellow" style={{ borderBottom: '1px solid #141e30' }}>{h.current?.toFixed(2)}A</td>
+                            <td className="px-3 py-2 text-[11px] val-cyan" style={{ borderBottom: '1px solid #141e30' }}>{h.rpm}</td>
+                            <td className="px-3 py-2 text-[11px] val-cyan" style={{ borderBottom: '1px solid #141e30' }}>{(((h.rms_x ?? 0) + (h.rms_y ?? 0)) / 2).toFixed(2)}</td>
+                            <td className="px-3 py-2 text-[10px] text-slate-500" style={{ borderBottom: '1px solid #141e30' }}>{fmtTime(h.updated_at)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </>
         )}
       </div>
-    </div>
-  );
-}
-
-function KPICard({ icon: Icon, color, label, value, sub }: {
-  icon: typeof TrendingUp; color: string; label: string; value: string; sub: string;
-}) {
-  return (
-    <div className="panel" style={{ borderRadius: 6, padding: 14 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-        <div style={{
-          width: 28, height: 28, borderRadius: 5,
-          background: `${color}15`, border: `1px solid ${color}40`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <Icon size={14} color={color} />
-        </div>
-        <span style={{ fontSize: 10, fontWeight: 600, color: '#94a3b8', letterSpacing: '0.5px' }}>
-          {label.toUpperCase()}
-        </span>
-      </div>
-      <div style={{ fontSize: 22, fontWeight: 700, color }}>{value}</div>
-      <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>{sub}</div>
-    </div>
-  );
-}
-
-function TrendChart({ title, data, color, unit }: {
-  title: string; data: { t: number; v: number }[]; color: string; unit: string;
-}) {
-  const WIDTH = 400;
-  const HEIGHT = 160;
-  const PADDING = { top: 22, right: 8, bottom: 18, left: 36 };
-  const innerW = WIDTH - PADDING.left - PADDING.right;
-  const innerH = HEIGHT - PADDING.top - PADDING.bottom;
-
-  if (data.length === 0) {
-    return (
-      <div className="panel chart-bg" style={{ height: HEIGHT, borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b', fontSize: 11 }}>
-        {title} — No data
-      </div>
-    );
-  }
-
-  const minV = Math.min(...data.map((d) => d.v));
-  const maxV = Math.max(...data.map((d) => d.v));
-  const range = maxV - minV || 1;
-  const pad = range * 0.15;
-  const yMin = minV - pad;
-  const yMax = maxV + pad;
-  const yRange = yMax - yMin || 1;
-
-  const xScale = (i: number) => PADDING.left + (i / Math.max(1, data.length - 1)) * innerW;
-  const yScale = (v: number) => PADDING.top + innerH - ((v - yMin) / yRange) * innerH;
-
-  const linePath = data.map((d, i) => `${i === 0 ? 'M' : 'L'} ${xScale(i).toFixed(1)} ${yScale(d.v).toFixed(1)}`).join(' ');
-  const areaPath = `M ${xScale(0).toFixed(1)} ${(PADDING.top + innerH).toFixed(1)} ${data.map((d, i) => `L ${xScale(i).toFixed(1)} ${yScale(d.v).toFixed(1)}`).join(' ')} L ${xScale(data.length - 1).toFixed(1)} ${(PADDING.top + innerH).toFixed(1)} Z`;
-  const gridLines = [0, 0.25, 0.5, 0.75, 1].map((f) => PADDING.top + f * innerH);
-  const gradId = `grad-${title.replace(/\s+/g, '')}`;
-
-  return (
-    <div className="panel chart-bg" style={{ height: HEIGHT, borderRadius: 4, overflow: 'hidden' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 10px', borderBottom: '1px solid #1e2d45' }}>
-        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '1px', color: '#94a3b8' }}>{title}</span>
-        <span style={{ fontSize: 9, color }}>● {unit}</span>
-      </div>
-      <svg width="100%" height={HEIGHT - 22} viewBox={`0 0 ${WIDTH} ${HEIGHT - 22}`} preserveAspectRatio="none">
-        <defs>
-          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={color} stopOpacity={0.35} />
-            <stop offset="100%" stopColor={color} stopOpacity={0.02} />
-          </linearGradient>
-        </defs>
-        {gridLines.map((y, i) => (
-          <line key={i} x1={PADDING.left} y1={y} x2={WIDTH - PADDING.right} y2={y} className="chart-grid-line" />
-        ))}
-        {[0, 0.25, 0.5, 0.75, 1].map((f, i) => (
-          <text key={i} x={PADDING.left - 4} y={PADDING.top + f * innerH + 3} textAnchor="end" fontSize={8} fill="#64748b">
-            {(yMax - f * yRange).toFixed(1)}
-          </text>
-        ))}
-        <path d={areaPath} fill={`url(#${gradId})`} />
-        <path d={linePath} fill="none" stroke={color} strokeWidth={1.5} />
-      </svg>
     </div>
   );
 }

@@ -23,13 +23,6 @@ export interface Alert {
   is_read: boolean; resolved_at: string | null; created_at: string;
 }
 
-export interface Prediction {
-  id: string; machine_id: string; user_id: string;
-  health_score: number; status: HealthStatus;
-  bearing_wear_pct: number; overheating_risk_pct: number; failure_risk_pct: number;
-  rul_hours: number; predicted_at: string;
-}
-
 export interface MachineHealth {
   machine_id: string; user_id: string;
   rms_x: number; rms_y: number; temperature: number; current: number; rpm: number; voltage: number;

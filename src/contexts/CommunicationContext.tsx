@@ -3,60 +3,59 @@ import {
 } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from './AuthContext';
-import { useMonitoring, type LiveReading } from './MonitoringContext';
+import { useMonitoring } from './MonitoringContext';
 
-// ─── Types ──────────────────────────────────────────────────────────────────
-
-export type CommMethod =
-  | 'usb_serial'
-  | 'wifi'
-  | 'mqtt'
-  | 'modbus_tcp'
-  | 'opcua'
-  | 'rest_api';
-
+export type CommMethod = 'usb_serial' | 'wifi' | 'mqtt' | 'rest_api' | 'modbus_tcp' | 'opcua';
 export type ConnStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
 export interface CommConfig {
-  host?: string;
-  port?: number;
+  machineId?: string;
+  port?: string;
   baudRate?: number;
-  serialPort?: string;
-  broker?: string;
-  topic?: string;
-  endpoint?: string;
-  pollInterval?: number;
-  unitId?: number;
-  registerStart?: number;
-  registerCount?: number;
-  nodeId?: string;
   autoReconnect?: boolean;
+  ipAddress?: string;
+  wifiPort?: number;
+  broker?: string;
+  mqttPort?: number;
+  username?: string;
+  password?: string;
+  topic?: string;
+  ssl?: boolean;
+  slaveId?: number;
+  registerMap?: { address: number; name: string; type: string }[];
+  serverUrl?: string;
+  nodeId?: string;
+  endpointUrl?: string;
+  apiKey?: string;
+  authType?: 'none' | 'bearer' | 'basic' | 'apikey';
+  pollInterval?: number;
 }
 
 export interface CommSetting {
   id: string;
   user_id: string;
-  name: string;
   method: CommMethod;
+  name: string;
   config: CommConfig;
+  is_active: boolean;
+  status: ConnStatus;
+  last_connected_at: string | null;
   created_at: string;
   updated_at: string;
 }
 
-export const METHOD_LABELS: Record<CommMethod, string> = {
-  usb_serial: 'USB Serial',
-  wifi: 'Wi-Fi',
-  mqtt: 'MQTT',
-  modbus_tcp: 'Modbus TCP',
-  opcua: 'OPC UA',
-  rest_api: 'REST API',
-};
-
 export interface IncomingData {
-  timestamp: number;
-  raw: string;
-  parsed: Partial<LiveReading>;
-  method: CommMethod;
+  timestamp: string;
+  raw: Record<string, unknown>;
+  source: CommMethod;
+  parsed?: {
+    temperature?: number;
+    rmsX?: number;
+    rmsY?: number;
+    current?: number;
+    rpm?: number;
+    voltage?: number;
+  };
 }
 
 interface CommunicationContextValue {
@@ -65,490 +64,418 @@ interface CommunicationContextValue {
   activeStatus: ConnStatus;
   incomingData: IncomingData[];
   dataBuffer: IncomingData[];
-  saveSetting: (name: string, method: CommMethod, config: CommConfig) => Promise<void>;
+  saveSetting: (method: CommMethod, name: string, config: CommConfig) => Promise<void>;
   updateSetting: (id: string, updates: Partial<CommSetting>) => Promise<void>;
   deleteSetting: (id: string) => Promise<void>;
-  activateSetting: (id: string) => void;
-  connect: (setting?: CommSetting) => Promise<void>;
+  activateSetting: (id: string) => Promise<void>;
+  connect: (id: string) => Promise<void>;
   disconnect: () => void;
   refreshSettings: () => Promise<void>;
   clearBuffer: () => void;
   availablePorts: string[];
-  refreshPorts: () => Promise<void>;
+  refreshPorts: () => void;
 }
 
 const CommunicationContext = createContext<CommunicationContextValue | null>(null);
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+export const METHOD_LABELS: Record<CommMethod, string> = {
+  usb_serial: 'USB Serial',
+  wifi: 'Wi-Fi',
+  mqtt: 'MQTT',
+  rest_api: 'REST API',
+  modbus_tcp: 'Modbus TCP',
+  opcua: 'OPC UA',
+};
 
-function parseIncoming(raw: string): Partial<LiveReading> {
-  const parsed: Partial<LiveReading> = {};
-  try {
-    // Try JSON first
-    const json = JSON.parse(raw);
-    if (typeof json.temperature === 'number') parsed.temperature = json.temperature;
-    if (typeof json.rmsX === 'number') parsed.rmsX = json.rmsX;
-    if (typeof json.rms_y === 'number') parsed.rmsX = json.rms_y;
-    if (typeof json.rmsY === 'number') parsed.rmsY = json.rmsY;
-    if (typeof json.rms_x === 'number') parsed.rmsY = json.rms_x;
-    if (typeof json.current === 'number') parsed.current = json.current;
-    if (typeof json.rpm === 'number') parsed.rpm = json.rpm;
-    if (typeof json.voltage === 'number') parsed.voltage = json.voltage;
-    if (typeof json.vib_x === 'number') parsed.rmsX = json.vib_x;
-    if (typeof json.vib_y === 'number') parsed.rmsY = json.vib_y;
-    return parsed;
-  } catch {
-    // Fall through to CSV / key=value parsing
-  }
-
-  // key=value pairs
-  const kvRegex = /(\w+)\s*[=:]\s*(-?\d+\.?\d*)/g;
-  let match: RegExpExecArray | null;
-  while ((match = kvRegex.exec(raw)) !== null) {
-    const key = match[1].toLowerCase();
-    const val = parseFloat(match[2]);
-    if (Number.isNaN(val)) continue;
-    if (key.includes('temp')) parsed.temperature = val;
-    else if (key.includes('rms_x') || key === 'rmsx') parsed.rmsX = val;
-    else if (key.includes('rms_y') || key === 'rmsy') parsed.rmsY = val;
-    else if (key.includes('current') || key === 'curr') parsed.current = val;
-    else if (key.includes('rpm')) parsed.rpm = val;
-    else if (key.includes('voltage') || key === 'volt') parsed.voltage = val;
-  }
-
-  // CSV: temp,rmsX,rmsY,current,rpm,voltage
-  if (Object.keys(parsed).length === 0) {
-    const parts = raw.split(',').map((s) => parseFloat(s.trim()));
-    if (parts.length >= 1 && !Number.isNaN(parts[0])) parsed.temperature = parts[0];
-    if (parts.length >= 2 && !Number.isNaN(parts[1])) parsed.rmsX = parts[1];
-    if (parts.length >= 3 && !Number.isNaN(parts[2])) parsed.rmsY = parts[2];
-    if (parts.length >= 4 && !Number.isNaN(parts[3])) parsed.current = parts[3];
-    if (parts.length >= 5 && !Number.isNaN(parts[4])) parsed.rpm = parts[4];
-    if (parts.length >= 6 && !Number.isNaN(parts[5])) parsed.voltage = parts[5];
-  }
-
-  return parsed;
+function parseReading(raw: Record<string, unknown>): IncomingData['parsed'] {
+  const get = (keys: string[]): number | undefined => {
+    for (const k of keys) {
+      const v = raw[k];
+      if (typeof v === 'number') return v;
+      if (typeof v === 'string') { const n = parseFloat(v); if (!isNaN(n)) return n; }
+    }
+    return undefined;
+  };
+  return {
+    temperature: get(['temperature', 'temp', 't']),
+    rmsX: get(['rmsX', 'rms_x', 'vibration_x', 'vx']),
+    rmsY: get(['rmsY', 'rms_y', 'vibration_y', 'vy']),
+    current: get(['current', 'curr', 'i']),
+    rpm: get(['rpm', 'speed', 'n']),
+    voltage: get(['voltage', 'volt', 'v']),
+  };
 }
-
-function buildUrl(method: CommMethod, config: CommConfig): string {
-  const host = config.host || config.broker || 'localhost';
-  const port = config.port || 8080;
-  switch (method) {
-    case 'wifi':
-      return `ws://${host}:${port}/data`;
-    case 'mqtt':
-      return `ws://${host}:${port}/mqtt`;
-    case 'modbus_tcp':
-      return `ws://${host}:${port}`;
-    case 'opcua':
-      return `ws://${host}:${port}`;
-    default:
-      return '';
-  }
-}
-
-// ─── Provider ────────────────────────────────────────────────────────────────
 
 export function CommunicationProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const { pushLiveReading } = useMonitoring();
-
   const [settings, setSettings] = useState<CommSetting[]>([]);
-  const [activeSettingId, setActiveSettingId] = useState<string | null>(null);
+  const [activeSetting, setActiveSetting] = useState<CommSetting | null>(null);
   const [activeStatus, setActiveStatus] = useState<ConnStatus>('disconnected');
+  const [incomingData, setIncomingData] = useState<IncomingData[]>([]);
   const [dataBuffer, setDataBuffer] = useState<IncomingData[]>([]);
   const [availablePorts, setAvailablePorts] = useState<string[]>([]);
-
-  // Connection refs
-  const wsRef = useRef<WebSocket | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const serialRef = useRef<unknown>(null);
-  const simRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const activeSettingRef = useRef<CommSetting | null>(null);
-
-  const activeSetting = settings.find((s) => s.id === activeSettingId) ?? null;
   activeSettingRef.current = activeSetting;
 
-  const MAX_BUFFER = 500;
-
-  const pushData = useCallback((raw: string, method: CommMethod) => {
-    const parsed = parseIncoming(raw);
-    const entry: IncomingData = {
-      timestamp: Date.now(),
-      raw,
-      parsed,
-      method,
-    };
-    setDataBuffer((prev) => [...prev.slice(-(MAX_BUFFER - 1)), entry]);
-
-    // Push to monitoring context if we got meaningful data
-    if (Object.keys(parsed).length > 0) {
-      pushLiveReading(parsed);
-    }
-  }, [pushLiveReading]);
-
-  // ─── Connection logic per method ──────────────────────────────────────────
-
-  const startWebSocket = useCallback((setting: CommSetting) => {
-    const url = buildUrl(setting.method, setting.config);
-    if (!url) return;
-    setActiveStatus('connecting');
-
-    try {
-      const ws = new WebSocket(url);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        setActiveStatus('connected');
-        if (setting.method === 'mqtt' && setting.config.topic) {
-          // MQTT subscribe via WebSocket
-          ws.send(JSON.stringify({ cmd: 'subscribe', topic: setting.config.topic }));
-        }
-      };
-
-      ws.onmessage = (event) => {
-        const raw = typeof event.data === 'string' ? event.data : '';
-        pushData(raw, setting.method);
-      };
-
-      ws.onerror = () => {
-        setActiveStatus('error');
-      };
-
-      ws.onclose = () => {
-        setActiveStatus('disconnected');
-        wsRef.current = null;
-        if (setting.config.autoReconnect) {
-          scheduleReconnect(setting);
-        }
-      };
-    } catch {
-      setActiveStatus('error');
-      if (setting.config.autoReconnect) scheduleReconnect(setting);
-    }
-  }, [pushData]);
-
-  const scheduleReconnect = useCallback((setting: CommSetting) => {
-    if (reconnectRef.current) clearTimeout(reconnectRef.current);
-    reconnectRef.current = setTimeout(() => {
-      if (activeSettingRef.current?.id === setting.id) {
-        connectInternal(setting);
-      }
-    }, 3000);
-  }, []);
-
-  const startPolling = useCallback(async (setting: CommSetting) => {
-    const { endpoint, pollInterval = 2000 } = setting.config;
-    if (!endpoint) return;
-    setActiveStatus('connecting');
-
-    const poll = async () => {
-      try {
-        const res = await fetch(endpoint);
-        if (!res.ok) {
-          setActiveStatus('error');
-          return;
-        }
-        const text = await res.text();
-        setActiveStatus('connected');
-        pushData(text, 'rest_api');
-      } catch {
-        setActiveStatus('error');
-      }
-    };
-
-    await poll();
-    pollRef.current = setInterval(poll, pollInterval);
-  }, [pushData]);
-
-  const startModbusPolling = useCallback((setting: CommSetting) => {
-    const url = buildUrl(setting.method, setting.config);
-    if (!url) return;
-    setActiveStatus('connecting');
-
-    try {
-      const ws = new WebSocket(url);
-      wsRef.current = ws;
-      const { unitId = 1, registerStart = 0, registerCount = 10, pollInterval = 1000 } = setting.config;
-
-      ws.onopen = () => {
-        setActiveStatus('connected');
-        pollRef.current = setInterval(() => {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({
-              unitId,
-              functionCode: 3,
-              startAddress: registerStart,
-              quantity: registerCount,
-            }));
-          }
-        }, pollInterval);
-      };
-
-      ws.onmessage = (event) => {
-        const raw = typeof event.data === 'string' ? event.data : '';
-        pushData(raw, 'modbus_tcp');
-      };
-
-      ws.onerror = () => setActiveStatus('error');
-
-      ws.onclose = () => {
-        setActiveStatus('disconnected');
-        wsRef.current = null;
-        if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
-        if (setting.config.autoReconnect) scheduleReconnect(setting);
-      };
-    } catch {
-      setActiveStatus('error');
-      if (setting.config.autoReconnect) scheduleReconnect(setting);
-    }
-  }, [pushData, scheduleReconnect]);
-
-  const startUSBSerial = useCallback(async (setting: CommSetting) => {
-    const { serialPort, baudRate = 9600 } = setting.config;
-    setActiveStatus('connecting');
-
-    // Try Web Serial API
-    const nav = navigator as Navigator & { serial?: { requestPort: () => Promise<unknown>; getPorts: () => Promise<unknown[]> } };
-    if (nav.serial) {
-      try {
-        const port = await nav.serial.requestPort();
-        serialRef.current = port;
-        // Web Serial API open would go here; for browser compatibility we simulate
-        setActiveStatus('connected');
-        simRef.current = setInterval(() => {
-          const temp = 40 + Math.random() * 20;
-          const rmsX = 0.5 + Math.random() * 0.5;
-          const rmsY = 0.4 + Math.random() * 0.4;
-          const current = 1.5 + Math.random() * 1.5;
-          const rpm = 1450 + Math.round(Math.random() * 100);
-          const voltage = 218 + Math.random() * 4;
-          pushData(
-            JSON.stringify({ temperature: +temp.toFixed(1), rmsX: +rmsX.toFixed(3), rmsY: +rmsY.toFixed(3), current: +current.toFixed(2), rpm, voltage: +voltage.toFixed(1) }),
-            'usb_serial'
-          );
-        }, 1000);
-        return;
-      } catch {
-        // User cancelled or no port — fall through to simulation
-      }
-    }
-
-    // Simulate serial data
-    setActiveStatus('connected');
-    simRef.current = setInterval(() => {
-      const temp = 40 + Math.random() * 20;
-      const rmsX = 0.5 + Math.random() * 0.5;
-      const rmsY = 0.4 + Math.random() * 0.4;
-      const current = 1.5 + Math.random() * 1.5;
-      const rpm = 1450 + Math.round(Math.random() * 100);
-      const voltage = 218 + Math.random() * 4;
-      pushData(
-        `temp=${temp.toFixed(1)},rms_x=${rmsX.toFixed(3)},rms_y=${rmsY.toFixed(3)},current=${current.toFixed(2)},rpm=${rpm},voltage=${voltage.toFixed(1)}`,
-        'usb_serial'
-      );
-    }, 1000);
-  }, [pushData]);
-
-  const startOpcUA = useCallback((setting: CommSetting) => {
-    const url = buildUrl(setting.method, setting.config);
-    if (!url) return;
-    setActiveStatus('connecting');
-
-    try {
-      const ws = new WebSocket(url);
-      wsRef.current = ws;
-      const { nodeId = 'ns=2;s=Temperature', pollInterval = 1000 } = setting.config;
-
-      ws.onopen = () => {
-        setActiveStatus('connected');
-        ws.send(JSON.stringify({ cmd: 'subscribe', nodeId }));
-      };
-
-      ws.onmessage = (event) => {
-        const raw = typeof event.data === 'string' ? event.data : '';
-        pushData(raw, 'opcua');
-      };
-
-      ws.onerror = () => setActiveStatus('error');
-
-      ws.onclose = () => {
-        setActiveStatus('disconnected');
-        wsRef.current = null;
-        if (setting.config.autoReconnect) scheduleReconnect(setting);
-      };
-    } catch {
-      setActiveStatus('error');
-      if (setting.config.autoReconnect) scheduleReconnect(setting);
-    }
-  }, [pushData, scheduleReconnect]);
-
-  const connectInternal = useCallback(async (setting: CommSetting) => {
-    // Clean up any existing connection
-    cleanupConnection();
-
-    switch (setting.method) {
-      case 'usb_serial':
-        await startUSBSerial(setting);
-        break;
-      case 'wifi':
-        startWebSocket(setting);
-        break;
-      case 'mqtt':
-        startWebSocket(setting);
-        break;
-      case 'modbus_tcp':
-        startModbusPolling(setting);
-        break;
-      case 'opcua':
-        startOpcUA(setting);
-        break;
-      case 'rest_api':
-        await startPolling(setting);
-        break;
-    }
-  }, [startUSBSerial, startWebSocket, startModbusPolling, startOpcUA, startPolling]);
-
-  const cleanupConnection = useCallback(() => {
-    if (wsRef.current) {
-      try { wsRef.current.close(); } catch { /* ignore */ }
-      wsRef.current = null;
-    }
-    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
-    if (reconnectRef.current) { clearTimeout(reconnectRef.current); reconnectRef.current = null; }
-    if (simRef.current) { clearInterval(simRef.current); simRef.current = null; }
-    serialRef.current = null;
-  }, []);
-
-  // ─── Public API ───────────────────────────────────────────────────────────
-
-  const connect = useCallback(async (setting?: CommSetting) => {
-    const target = setting ?? activeSettingRef.current;
-    if (!target) return;
-    setActiveSettingId(target.id);
-    await connectInternal(target);
-  }, [connectInternal]);
-
-  const disconnect = useCallback(() => {
-    cleanupConnection();
-    setActiveStatus('disconnected');
-  }, [cleanupConnection]);
-
-  const activateSetting = useCallback((id: string) => {
-    setActiveSettingId(id);
-  }, []);
-
-  const clearBuffer = useCallback(() => {
-    setDataBuffer([]);
-  }, []);
-
-  async function refreshSettings() {
+  const refreshSettings = useCallback(async () => {
     if (!user) return;
-    const { data, error } = await supabase
-      .from('communication_settings')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at');
-    if (!error && data) {
-      const mapped: CommSetting[] = data.map((row: Record<string, unknown>) => ({
-        id: row.id as string,
-        user_id: row.user_id as string,
-        name: row.name as string,
-        method: row.method as CommMethod,
-        config: (typeof row.config === 'string' ? JSON.parse(row.config as string) : row.config) as CommConfig,
-        created_at: row.created_at as string,
-        updated_at: row.updated_at as string,
-      }));
-      setSettings(mapped);
+    const { data } = await supabase.from('communication_settings').select('*').eq('user_id', user.id).order('created_at');
+    if (data) {
+      const typed = data as CommSetting[];
+      setSettings(typed);
+      const active = typed.find((s) => s.is_active) ?? null;
+      setActiveSetting(active);
+      setActiveStatus(active?.status ?? 'disconnected');
     }
-  }
-
-  async function saveSetting(name: string, method: CommMethod, config: CommConfig) {
-    if (!user) return;
-    const { data, error } = await supabase
-      .from('communication_settings')
-      .insert({
-        user_id: user.id,
-        name,
-        method,
-        config: JSON.stringify(config),
-      })
-      .select('*')
-      .single();
-    if (!error && data) {
-      await refreshSettings();
-    }
-  }
-
-  async function updateSetting(id: string, updates: Partial<CommSetting>) {
-    if (!user) return;
-    const payload: Record<string, unknown> = { updated_at: new Date().toISOString() };
-    if (updates.name !== undefined) payload.name = updates.name;
-    if (updates.method !== undefined) payload.method = updates.method;
-    if (updates.config !== undefined) payload.config = JSON.stringify(updates.config);
-    await supabase.from('communication_settings').update(payload).eq('id', id);
-    await refreshSettings();
-  }
-
-  async function deleteSetting(id: string) {
-    if (!user) return;
-    if (activeSettingId === id) disconnect();
-    await supabase.from('communication_settings').delete().eq('id', id);
-    await refreshSettings();
-  }
-
-  async function refreshPorts() {
-    const nav = navigator as Navigator & { serial?: { getPorts: () => Promise<unknown[]> } };
-    if (nav.serial) {
-      try {
-        const ports = await nav.serial.getPorts();
-        setAvailablePorts(ports.map((_, i) => `COM${i + 1}`));
-      } catch {
-        setAvailablePorts([]);
-      }
-    } else {
-      // Simulated ports
-      setAvailablePorts(['COM1', 'COM2', 'COM3', '/dev/ttyUSB0', '/dev/ttyACM0']);
-    }
-  }
-
-  // Load settings on mount / user change
-  useEffect(() => {
-    if (user) {
-      refreshSettings();
-      refreshPorts();
-    } else {
-      setSettings([]);
-      disconnect();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => cleanupConnection();
-  }, [cleanupConnection]);
+  useEffect(() => { refreshSettings(); }, [refreshSettings]);
 
-  const incomingData = dataBuffer.slice(-50);
+  const refreshPorts = useCallback(() => {
+    const ports: string[] = ['COM1', 'COM2', 'COM3', 'COM4', 'COM5', '/dev/ttyUSB0', '/dev/ttyACM0', '/dev/ttyS0'];
+    if (typeof navigator !== 'undefined' && 'serial' in navigator) {
+      try {
+        (navigator as Navigator & { serial: { getPorts: () => Promise<unknown[]> } }).serial.getPorts().then((found: unknown[]) => {
+          if (found.length > 0) {
+            setAvailablePorts([...ports, ...found.map((_, i) => `WebSerial-${i}`)]);
+          } else {
+            setAvailablePorts(ports);
+          }
+        }).catch(() => setAvailablePorts(ports));
+      } catch {
+        setAvailablePorts(ports);
+      }
+    } else {
+      setAvailablePorts(ports);
+    }
+  }, []);
+
+  useEffect(() => { refreshPorts(); }, [refreshPorts]);
+
+  const storeReading = useCallback(async (parsed: IncomingData['parsed'], raw: Record<string, unknown>, source: CommMethod) => {
+    if (!user || !activeSettingRef.current) return;
+    const machineId = activeSettingRef.current.config.machineId;
+    if (!machineId) return;
+    const records: Record<string, unknown>[] = [];
+    if (parsed.temperature != null) records.push({ machine_id: machineId, user_id: user.id, value: parsed.temperature, unit: '°C', quality: 'good', metadata: raw });
+    if (parsed.current != null) records.push({ machine_id: machineId, user_id: user.id, value: parsed.current, unit: 'A', quality: 'good', metadata: raw });
+    if (parsed.rpm != null) records.push({ machine_id: machineId, user_id: user.id, value: parsed.rpm, unit: 'RPM', quality: 'good', metadata: raw });
+    if (parsed.voltage != null) records.push({ machine_id: machineId, user_id: user.id, value: parsed.voltage, unit: 'V', quality: 'good', metadata: raw });
+    if (records.length > 0) await supabase.from('sensor_data').insert(records);
+    if (parsed.temperature != null || parsed.current != null) {
+      await supabase.from('sensor_snapshots').insert({
+        machine_id: machineId, user_id: user.id,
+        temperature: parsed.temperature ?? 0,
+        vibration_rms: ((parsed.rmsX ?? 0) + (parsed.rmsY ?? 0)) / 2,
+        current: parsed.current ?? 0, rpm: parsed.rpm ?? 0, voltage: parsed.voltage ?? 220,
+      });
+    }
+    await supabase.from('machine_health').upsert({
+      machine_id: machineId, user_id: user.id,
+      rms_x: parsed.rmsX ?? 0, rms_y: parsed.rmsY ?? 0,
+      temperature: parsed.temperature ?? 0, current: parsed.current ?? 0,
+      rpm: parsed.rpm ?? 0, voltage: parsed.voltage ?? 220,
+      updated_at: new Date().toISOString(),
+    });
+  }, [user]);
+
+  const handleIncoming = useCallback((raw: Record<string, unknown>, source: CommMethod) => {
+    const parsed = parseReading(raw);
+    const entry: IncomingData = { timestamp: new Date().toISOString(), raw, source, parsed };
+    setIncomingData((prev) => [entry, ...prev].slice(0, 100));
+    setDataBuffer((prev) => [entry, ...prev].slice(0, 50));
+    if (parsed.temperature != null || parsed.rmsX != null || parsed.current != null) {
+      pushLiveReading({
+        temperature: parsed.temperature, rmsX: parsed.rmsX, rmsY: parsed.rmsY,
+        current: parsed.current, rpm: parsed.rpm, voltage: parsed.voltage,
+      });
+    }
+    storeReading(parsed, raw, source);
+  }, [storeReading, pushLiveReading]);
+
+  /* --- Protocol implementations --- */
+
+  const startRestPolling = useCallback((setting: CommSetting) => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    const config = setting.config;
+    const interval = (config.pollInterval ?? 2) * 1000;
+    const poll = async () => {
+      try {
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (config.authType === 'bearer' && config.apiKey) headers['Authorization'] = `Bearer ${config.apiKey}`;
+        else if (config.authType === 'apikey' && config.apiKey) headers['X-API-Key'] = config.apiKey;
+        const res = await fetch(config.endpointUrl!, { headers });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+        handleIncoming(json, 'rest_api');
+      } catch (err) { console.error('REST poll error:', err); }
+    };
+    poll();
+    pollRef.current = setInterval(poll, interval);
+  }, [handleIncoming]);
+
+  const startWifi = useCallback((setting: CommSetting) => {
+    const config = setting.config;
+    const url = `ws://${config.ipAddress}:${config.wifiPort ?? 80}/data`;
+    try {
+      if (wsRef.current) wsRef.current.close();
+      const ws = new WebSocket(url); wsRef.current = ws;
+      ws.onopen = () => {
+        setActiveStatus('connected');
+        supabase.from('communication_settings').update({ status: 'connected', last_connected_at: new Date().toISOString() }).eq('id', setting.id);
+      };
+      ws.onmessage = (event) => { try { const json = JSON.parse(event.data); handleIncoming(json, 'wifi'); } catch { /* ignore */ } };
+      ws.onerror = () => {
+        setActiveStatus('error');
+        supabase.from('communication_settings').update({ status: 'error' }).eq('id', setting.id);
+        if (config.autoReconnect) reconnectRef.current = setTimeout(() => startWifi(setting), 3000);
+      };
+      ws.onclose = () => {
+        if (activeSettingRef.current?.id === setting.id) {
+          setActiveStatus('disconnected');
+          if (config.autoReconnect) reconnectRef.current = setTimeout(() => startWifi(setting), 3000);
+        }
+      };
+    } catch { setActiveStatus('error'); }
+  }, [handleIncoming]);
+
+  const startMqtt = useCallback((setting: CommSetting) => {
+    const config = setting.config;
+    const wsProtocol = config.ssl ? 'wss' : 'ws';
+    const wsPort = config.ssl ? 8084 : 8083;
+    const url = `${wsProtocol}://${config.broker}:${wsPort}/mqtt`;
+    try {
+      if (wsRef.current) wsRef.current.close();
+      const ws = new WebSocket(url, ['mqtt']); wsRef.current = ws;
+      ws.onopen = () => {
+        const clientId = 'veltrix_' + Math.random().toString(16).slice(2, 10);
+        ws.send(JSON.stringify({ type: 'connect', clientId, username: config.username ?? '', password: config.password ?? '', keepAlive: 60 }));
+        setTimeout(() => ws.send(JSON.stringify({ type: 'subscribe', topics: [config.topic ?? 'veltrix/data'] })), 500);
+        setActiveStatus('connected');
+        supabase.from('communication_settings').update({ status: 'connected', last_connected_at: new Date().toISOString() }).eq('id', setting.id);
+      };
+      ws.onmessage = (event) => { try { const json = JSON.parse(event.data); handleIncoming(json, 'mqtt'); } catch { /* ignore */ } };
+      ws.onerror = () => {
+        setActiveStatus('error');
+        supabase.from('communication_settings').update({ status: 'error' }).eq('id', setting.id);
+        if (config.autoReconnect) reconnectRef.current = setTimeout(() => startMqtt(setting), 3000);
+      };
+      ws.onclose = () => {
+        if (activeSettingRef.current?.id === setting.id) {
+          setActiveStatus('disconnected');
+          if (config.autoReconnect) reconnectRef.current = setTimeout(() => startMqtt(setting), 3000);
+        }
+      };
+    } catch { setActiveStatus('error'); }
+  }, [handleIncoming]);
+
+  const startModbus = useCallback((setting: CommSetting) => {
+    const config = setting.config;
+    const url = `ws://${config.ipAddress}:${config.wifiPort ?? 502}`;
+    try {
+      if (wsRef.current) wsRef.current.close();
+      const ws = new WebSocket(url); wsRef.current = ws;
+      ws.onopen = () => {
+        setActiveStatus('connected');
+        supabase.from('communication_settings').update({ status: 'connected', last_connected_at: new Date().toISOString() }).eq('id', setting.id);
+        const pollModbus = async () => {
+          if (ws.readyState === WebSocket.OPEN)
+            ws.send(JSON.stringify({ type: 'readHoldingRegisters', slaveId: config.slaveId ?? 1, registers: config.registerMap ?? [] }));
+        };
+        pollModbus();
+        pollRef.current = setInterval(pollModbus, 2000);
+      };
+      ws.onmessage = (event) => {
+        try {
+          const json = JSON.parse(event.data);
+          const regMap = config.registerMap ?? [];
+          const mapped: Record<string, unknown> = {};
+          if (Array.isArray(json.values)) json.values.forEach((val: number, i: number) => { if (regMap[i]) mapped[regMap[i].name] = val; });
+          handleIncoming(mapped, 'modbus_tcp');
+        } catch { /* ignore */ }
+      };
+      ws.onerror = () => {
+        setActiveStatus('error');
+        supabase.from('communication_settings').update({ status: 'error' }).eq('id', setting.id);
+        if (config.autoReconnect) reconnectRef.current = setTimeout(() => startModbus(setting), 3000);
+      };
+      ws.onclose = () => {
+        if (activeSettingRef.current?.id === setting.id) {
+          setActiveStatus('disconnected');
+          if (config.autoReconnect) reconnectRef.current = setTimeout(() => startModbus(setting), 3000);
+        }
+      };
+    } catch { setActiveStatus('error'); }
+  }, [handleIncoming]);
+
+  const startOpcUa = useCallback((setting: CommSetting) => {
+    const config = setting.config;
+    const gatewayUrl = config.serverUrl?.replace('opc.tcp://', 'ws://').replace('https://', 'wss://');
+    try {
+      if (wsRef.current) wsRef.current.close();
+      const ws = new WebSocket(gatewayUrl ?? ''); wsRef.current = ws;
+      ws.onopen = () => {
+        setActiveStatus('connected');
+        supabase.from('communication_settings').update({ status: 'connected', last_connected_at: new Date().toISOString() }).eq('id', setting.id);
+        ws.send(JSON.stringify({ type: 'subscribe', nodeId: config.nodeId ?? 'ns=2;s=Temperature' }));
+      };
+      ws.onmessage = (event) => { try { const json = JSON.parse(event.data); if (json.type === 'data' || json.value !== undefined) handleIncoming(json, 'opcua'); } catch { /* ignore */ } };
+      ws.onerror = () => {
+        setActiveStatus('error');
+        supabase.from('communication_settings').update({ status: 'error' }).eq('id', setting.id);
+        if (config.autoReconnect) reconnectRef.current = setTimeout(() => startOpcUa(setting), 3000);
+      };
+      ws.onclose = () => {
+        if (activeSettingRef.current?.id === setting.id) {
+          setActiveStatus('disconnected');
+          if (config.autoReconnect) reconnectRef.current = setTimeout(() => startOpcUa(setting), 3000);
+        }
+      };
+    } catch { setActiveStatus('error'); }
+  }, [handleIncoming]);
+
+  const startUsbSerial = useCallback(async (setting: CommSetting) => {
+    const config = setting.config;
+    if (typeof navigator !== 'undefined' && 'serial' in navigator) {
+      try {
+        const port = await (navigator as Navigator & {
+          serial: {
+            requestPort: () => Promise<{
+              open: (opts: { baudRate: number }) => Promise<void>;
+              readable: { getReader: () => { read: () => Promise<{ done: boolean; value: Uint8Array }> } } | null;
+            }>;
+          };
+        }).serial.requestPort();
+        await port.open({ baudRate: config.baudRate ?? 115200 });
+        const reader = port.readable?.getReader();
+        if (reader) {
+          const decoder = new TextDecoder();
+          let buffer = '';
+          (async () => {
+            try {
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() ?? '';
+                for (const line of lines) {
+                  if (line.trim()) {
+                    try { const json = JSON.parse(line.trim()); handleIncoming(json, 'usb_serial'); } catch { /* ignore */ }
+                  }
+                }
+              }
+            } catch { /* ignore */ }
+          })();
+        }
+        setActiveStatus('connected');
+        supabase.from('communication_settings').update({ status: 'connected', last_connected_at: new Date().toISOString() }).eq('id', setting.id);
+      } catch {
+        setActiveStatus('error');
+        supabase.from('communication_settings').update({ status: 'error' }).eq('id', setting.id);
+      }
+    } else {
+      // Fallback: simulate serial data when Web Serial API not available
+      setActiveStatus('connected');
+      supabase.from('communication_settings').update({ status: 'connected', last_connected_at: new Date().toISOString() }).eq('id', setting.id);
+      pollRef.current = setInterval(() => {
+        const simulated = {
+          temperature: 45 + Math.random() * 30,
+          rmsX: 0.5 + Math.random() * 2,
+          rmsY: 0.5 + Math.random() * 2,
+          current: 1.5 + Math.random() * 3,
+          rpm: 1400 + Math.floor(Math.random() * 100),
+          voltage: 220 + (Math.random() - 0.5) * 5,
+        };
+        handleIncoming(simulated, 'usb_serial');
+      }, 2000);
+    }
+  }, [handleIncoming]);
+
+  const connect = useCallback(async (id: string) => {
+    const setting = settings.find((s) => s.id === id);
+    if (!setting) return;
+    // Clean up any existing connections
+    if (wsRef.current) { wsRef.current.close(); wsRef.current = null; }
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    if (reconnectRef.current) { clearTimeout(reconnectRef.current); reconnectRef.current = null; }
+
+    setActiveStatus('connecting');
+    await supabase.from('communication_settings').update({ status: 'connecting' }).eq('id', id);
+
+    // Enforce single-active: deactivate all others, activate this one
+    if (user) {
+      await supabase.from('communication_settings').update({ is_active: false }).eq('user_id', user.id).neq('id', id);
+      await supabase.from('communication_settings').update({ is_active: true }).eq('id', id);
+    }
+    setActiveSetting(setting);
+
+    switch (setting.method) {
+      case 'usb_serial': await startUsbSerial(setting); break;
+      case 'wifi': startWifi(setting); break;
+      case 'mqtt': startMqtt(setting); break;
+      case 'modbus_tcp': startModbus(setting); break;
+      case 'opcua': startOpcUa(setting); break;
+      case 'rest_api': startRestPolling(setting); break;
+    }
+  }, [settings, user, startUsbSerial, startWifi, startMqtt, startModbus, startOpcUa, startRestPolling]);
+
+  const disconnect = useCallback(() => {
+    if (wsRef.current) { wsRef.current.close(); wsRef.current = null; }
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    if (reconnectRef.current) { clearTimeout(reconnectRef.current); reconnectRef.current = null; }
+    setActiveStatus('disconnected');
+    if (activeSettingRef.current) {
+      supabase.from('communication_settings').update({ status: 'disconnected' }).eq('id', activeSettingRef.current.id);
+    }
+  }, []);
+
+  const saveSetting = useCallback(async (method: CommMethod, name: string, config: CommConfig) => {
+    if (!user) return;
+    await supabase.from('communication_settings').insert({
+      user_id: user.id, method, name, config, is_active: false, status: 'disconnected',
+    });
+    await refreshSettings();
+  }, [user, refreshSettings]);
+
+  const updateSetting = useCallback(async (id: string, updates: Partial<CommSetting>) => {
+    await supabase.from('communication_settings').update({ ...updates, updated_at: new Date().toISOString() }).eq('id', id);
+    await refreshSettings();
+  }, [refreshSettings]);
+
+  const deleteSetting = useCallback(async (id: string) => {
+    if (activeSetting?.id === id) disconnect();
+    await supabase.from('communication_settings').delete().eq('id', id);
+    await refreshSettings();
+  }, [activeSetting, disconnect, refreshSettings]);
+
+  const activateSetting = useCallback(async (id: string) => {
+    if (!user) return;
+    // Enforce single-active: deactivate all, activate only this one
+    await supabase.from('communication_settings').update({ is_active: false }).eq('user_id', user.id);
+    await supabase.from('communication_settings').update({ is_active: true }).eq('id', id);
+    await refreshSettings();
+  }, [user, refreshSettings]);
+
+  const clearBuffer = useCallback(() => { setIncomingData([]); setDataBuffer([]); }, []);
+
+  useEffect(() => {
+    return () => {
+      if (wsRef.current) wsRef.current.close();
+      if (pollRef.current) clearInterval(pollRef.current);
+      if (reconnectRef.current) clearTimeout(reconnectRef.current);
+    };
+  }, []);
 
   return (
     <CommunicationContext.Provider value={{
-      settings,
-      activeSetting,
-      activeStatus,
-      incomingData,
-      dataBuffer,
-      saveSetting,
-      updateSetting,
-      deleteSetting,
-      activateSetting,
-      connect,
-      disconnect,
-      refreshSettings,
-      clearBuffer,
-      availablePorts,
-      refreshPorts,
+      settings, activeSetting, activeStatus, incomingData, dataBuffer,
+      saveSetting, updateSetting, deleteSetting, activateSetting,
+      connect, disconnect, refreshSettings, clearBuffer, availablePorts, refreshPorts,
     }}>
       {children}
     </CommunicationContext.Provider>

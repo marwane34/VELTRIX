@@ -1,15 +1,19 @@
-import { useState, FormEvent, useEffect } from 'react';
-import { X, SlidersHorizontal } from 'lucide-react';
+import { useState, FormEvent } from 'react';
+import { X, Loader2, Sliders } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import type { Machine } from '../types';
 
-interface SetLimitsModalProps {
+interface Props {
   machine: Machine;
   onClose: () => void;
   onSaved: () => void;
 }
 
-export default function SetLimitsModal({ machine, onClose, onSaved }: SetLimitsModalProps) {
+/**
+ * Modal form for editing the safety thresholds of a machine. Updates the
+ * `machines` row with the six min/max limit fields, then notifies the parent.
+ */
+export default function SetLimitsModal({ machine, onClose, onSaved }: Props) {
   const [rmsMin, setRmsMin] = useState(String(machine.rms_min));
   const [rmsMax, setRmsMax] = useState(String(machine.rms_max));
   const [tempMin, setTempMin] = useState(String(machine.temp_min));
@@ -18,15 +22,6 @@ export default function SetLimitsModal({ machine, onClose, onSaved }: SetLimitsM
   const [currentMax, setCurrentMax] = useState(String(machine.current_max));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setRmsMin(String(machine.rms_min));
-    setRmsMax(String(machine.rms_max));
-    setTempMin(String(machine.temp_min));
-    setTempMax(String(machine.temp_max));
-    setCurrentMin(String(machine.current_min));
-    setCurrentMax(String(machine.current_max));
-  }, [machine]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -43,11 +38,7 @@ export default function SetLimitsModal({ machine, onClose, onSaved }: SetLimitsM
       updated_at: new Date().toISOString(),
     };
 
-    const { error: updateError } = await supabase
-      .from('machines')
-      .update(payload)
-      .eq('id', machine.id);
-
+    const { error: updateError } = await supabase.from('machines').update(payload).eq('id', machine.id);
     setSubmitting(false);
     if (updateError) {
       setError(updateError.message);
@@ -59,121 +50,79 @@ export default function SetLimitsModal({ machine, onClose, onSaved }: SetLimitsM
 
   const inputStyle: React.CSSProperties = {
     width: '100%',
-    background: '#060b14',
+    background: '#080d14',
     border: '1px solid #1e2d45',
     color: '#e2e8f0',
-    padding: '8px 10px',
-    borderRadius: 4,
-    fontSize: 13,
+    fontSize: 12,
+    padding: '7px 10px',
     outline: 'none',
   };
 
-  const labelStyle: React.CSSProperties = {
-    fontSize: 11, color: '#94a3b8', marginBottom: 4, display: 'block', fontWeight: 600,
-  };
+  const field = (
+    label: string,
+    value: string,
+    setter: (v: string) => void,
+    accent: string,
+  ) => (
+    <div className="flex flex-col gap-1">
+      <label className="text-[10px] tracking-wide" style={{ color: accent }}>{label}</label>
+      <input
+        type="number"
+        step="any"
+        value={value}
+        onChange={(e) => setter(e.target.value)}
+        style={inputStyle}
+      />
+    </div>
+  );
 
   return (
-    <div
-      onClick={onClose}
-      style={{
-        position: 'fixed', inset: 0,
-        background: 'rgba(0,0,0,0.7)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        zIndex: 1000,
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          background: '#0e1726',
-          border: '1px solid #1e2d45',
-          borderRadius: 8,
-          width: 460,
-          maxWidth: '90vw',
-          boxShadow: '0 8px 40px rgba(0,0,0,0.5)',
-        }}
-      >
-        {/* Header */}
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '12px 16px', borderBottom: '1px solid #1e2d45',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <SlidersHorizontal size={16} color="#3b82f6" />
-            <span style={{ fontSize: 13, fontWeight: 700, color: '#e2e8f0', letterSpacing: '0.5px' }}>
-              SET LIMITS — {machine.name}
-            </span>
+    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.7)' }}>
+      <div className="w-full max-w-md" style={{ background: '#0e1726', border: '1px solid #1e2d45', boxShadow: '0 0 40px rgba(0,0,0,0.8)' }}>
+        <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid #1e2d45', background: 'linear-gradient(180deg,#151f33 0%,#0f1726 100%)' }}>
+          <div className="flex items-center gap-2">
+            <Sliders size={14} className="text-blue-400" />
+            <span className="text-xs font-semibold text-slate-200 tracking-wide">SET LIMITS — {machine.name}</span>
           </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b' }}>
-            <X size={18} />
-          </button>
+          <button onClick={onClose}><X size={14} className="text-slate-500 hover:text-slate-300" /></button>
         </div>
 
-        {/* Form */}
-        <form onSubmit={handleSubmit} style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {/* Vibration Limits */}
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: '#3b82f6', marginBottom: 6, letterSpacing: '0.5px' }}>
-              VIBRATION (RMS)
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-              <div>
-                <label style={labelStyle}>Min</label>
-                <input type="number" step="0.01" value={rmsMin} onChange={(e) => setRmsMin(e.target.value)} style={inputStyle} />
-              </div>
-              <div>
-                <label style={labelStyle}>Max</label>
-                <input type="number" step="0.01" value={rmsMax} onChange={(e) => setRmsMax(e.target.value)} style={inputStyle} />
-              </div>
+        <form onSubmit={handleSubmit} className="p-4 flex flex-col gap-3">
+          <div className="flex flex-col gap-1">
+            <span className="text-[10px] text-cyan-400 tracking-wide font-semibold">VIBRATION RMS</span>
+            <div className="grid grid-cols-2 gap-2">
+              {field('MIN (mm/s)', rmsMin, setRmsMin, '#64748b')}
+              {field('MAX (mm/s)', rmsMax, setRmsMax, '#64748b')}
             </div>
           </div>
 
-          {/* Temperature Limits */}
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: '#f97316', marginBottom: 6, letterSpacing: '0.5px' }}>
-              TEMPERATURE (°C)
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-              <div>
-                <label style={labelStyle}>Min</label>
-                <input type="number" step="0.1" value={tempMin} onChange={(e) => setTempMin(e.target.value)} style={inputStyle} />
-              </div>
-              <div>
-                <label style={labelStyle}>Max</label>
-                <input type="number" step="0.1" value={tempMax} onChange={(e) => setTempMax(e.target.value)} style={inputStyle} />
-              </div>
+          <div className="flex flex-col gap-1">
+            <span className="text-[10px] text-orange-400 tracking-wide font-semibold">TEMPERATURE</span>
+            <div className="grid grid-cols-2 gap-2">
+              {field('MIN (°C)', tempMin, setTempMin, '#64748b')}
+              {field('MAX (°C)', tempMax, setTempMax, '#64748b')}
             </div>
           </div>
 
-          {/* Current Limits */}
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: '#eab308', marginBottom: 6, letterSpacing: '0.5px' }}>
-              CURRENT (A)
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-              <div>
-                <label style={labelStyle}>Min</label>
-                <input type="number" step="0.01" value={currentMin} onChange={(e) => setCurrentMin(e.target.value)} style={inputStyle} />
-              </div>
-              <div>
-                <label style={labelStyle}>Max</label>
-                <input type="number" step="0.01" value={currentMax} onChange={(e) => setCurrentMax(e.target.value)} style={inputStyle} />
-              </div>
+          <div className="flex flex-col gap-1">
+            <span className="text-[10px] text-yellow-400 tracking-wide font-semibold">CURRENT</span>
+            <div className="grid grid-cols-2 gap-2">
+              {field('MIN (A)', currentMin, setCurrentMin, '#64748b')}
+              {field('MAX (A)', currentMax, setCurrentMax, '#64748b')}
             </div>
           </div>
 
           {error && (
-            <div style={{ fontSize: 12, color: '#ef4444', padding: '6px 10px', background: '#ef444410', borderRadius: 4, border: '1px solid #ef444440' }}>
+            <div className="px-2 py-1.5 text-[10px] text-red-400" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)' }}>
               {error}
             </div>
           )}
 
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
-            <button type="button" className="btn-secondary" onClick={onClose}>
-              Cancel
-            </button>
-            <button type="submit" className="btn-monitor" disabled={submitting} style={{ opacity: submitting ? 0.6 : 1 }}>
-              {submitting ? 'Saving...' : 'Save Limits'}
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
+            <button type="submit" className="btn-monitor" disabled={submitting} style={{ opacity: submitting ? 0.7 : 1, display: 'flex', alignItems: 'center', gap: 6 }}>
+              {submitting ? <Loader2 size={12} className="animate-spin" /> : null}
+              {submitting ? 'Saving…' : 'Save Limits'}
             </button>
           </div>
         </form>

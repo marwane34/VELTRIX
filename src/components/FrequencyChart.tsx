@@ -1,69 +1,77 @@
-import { useMemo } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
-interface FrequencyChartProps {
-  data: { freq: number; amp: number }[];
+interface FreqPoint {
+  freq: number;
+  amp: number;
 }
 
-const WIDTH = 600;
-const HEIGHT = 160;
-const PADDING = { top: 22, right: 8, bottom: 18, left: 36 };
+interface Props {
+  data: FreqPoint[];
+}
 
-export default function FrequencyChart({ data }: FrequencyChartProps) {
-  const bars = useMemo(() => data, [data]);
+/**
+ * SVG bar chart for the frequency spectrum. Blue bars scaled to the peak
+ * amplitude, with frequency labels along the X axis on a dark canvas.
+ */
+export default function FrequencyChart({ data }: Props) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(600);
+  const height = 160;
 
-  const innerW = WIDTH - PADDING.left - PADDING.right;
-  const innerH = HEIGHT - PADDING.top - PADDING.bottom;
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const e of entries) setWidth(e.contentRect.width);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
-  const maxAmp = useMemo(() => {
-    if (bars.length === 0) return 1;
-    return Math.max(...bars.map((b) => b.amp), 0.1);
-  }, [bars]);
+  const bars = data;
+  const maxAmp = bars.length ? Math.max(...bars.map((b) => b.amp), 0.001) : 1;
+  const padTop = 8;
+  const padBottom = 20; // room for frequency labels
+  const plotH = height - padTop - padBottom;
+  const barW = bars.length ? width / bars.length : width;
+  const gap = Math.max(1, barW * 0.12);
 
-  const barWidth = bars.length > 0 ? innerW / bars.length : innerW;
-  const gridLines = [0, 0.25, 0.5, 0.75, 1].map((f) => PADDING.top + f * innerH);
+  // Label roughly every Nth bar to avoid crowding.
+  const labelStep = Math.max(1, Math.ceil(bars.length / 8));
 
   return (
-    <div className="panel chart-bg" style={{ height: HEIGHT, borderRadius: 4, overflow: 'hidden' }}>
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '4px 10px', borderBottom: '1px solid #1e2d45',
-      }}>
-        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '1px', color: '#94a3b8' }}>
-          FREQUENCY SPECTRUM
-        </span>
-        <span style={{ fontSize: 9, color: '#3b82f6' }}>● AMP (Hz)</span>
+    <div className="panel">
+      <div className="flex items-center justify-between px-3 py-2" style={{ borderBottom: '1px solid #1e2d45' }}>
+        <span className="text-xs font-semibold text-slate-200 tracking-wide">FREQUENCY SPECTRUM</span>
+        <span className="text-[10px] text-slate-500">Hz</span>
       </div>
-      <svg width="100%" height={HEIGHT - 22} viewBox={`0 0 ${WIDTH} ${HEIGHT - 22}`} preserveAspectRatio="none">
-        {/* Grid */}
-        {gridLines.map((y, i) => (
-          <line key={`h${i}`} x1={PADDING.left} y1={y} x2={WIDTH - PADDING.right} y2={y}
-            className="chart-grid-line" />
-        ))}
-        {/* Y-axis labels */}
-        {[1, 0.75, 0.5, 0.25, 0].map((v, i) => (
-          <text key={`yl${i}`} x={PADDING.left - 4} y={PADDING.top + (1 - v) * innerH + 3}
-            textAnchor="end" fontSize={8} fill="#64748b">
-            {(v * maxAmp).toFixed(2)}
-          </text>
-        ))}
-        {/* Bars */}
-        {bars.map((bar, i) => {
-          const barH = (bar.amp / maxAmp) * innerH;
-          const x = PADDING.left + i * barWidth;
-          const y = PADDING.top + innerH - barH;
-          return (
-            <rect key={i} x={x + 1} y={y} width={Math.max(1, barWidth - 2)} height={barH}
-              fill="#3b82f6" rx={1} opacity={0.85} />
-          );
-        })}
-        {/* X-axis labels */}
-        {bars.length > 0 && [0, Math.floor(bars.length / 4), Math.floor(bars.length / 2), Math.floor((bars.length * 3) / 4), bars.length - 1].map((idx, i) => (
-          <text key={`xl${i}`} x={PADDING.left + idx * barWidth} y={HEIGHT - 22 - 4}
-            textAnchor="middle" fontSize={8} fill="#64748b">
-            {bars[idx]?.freq ?? 0}Hz
-          </text>
-        ))}
-      </svg>
+      <div ref={containerRef} className="chart-bg" style={{ height }}>
+        <svg width={width} height={height} className="block">
+          {[0.25, 0.5, 0.75].map((f, i) => (
+            <line key={`hg${i}`} x1={0} y1={padTop + plotH * f} x2={width} y2={padTop + plotH * f} className="chart-grid-line" />
+          ))}
+          {bars.map((b, i) => {
+            const h = (b.amp / maxAmp) * plotH;
+            const x = i * barW + gap / 2;
+            const y = padTop + plotH - h;
+            const w = Math.max(1, barW - gap);
+            return <rect key={i} x={x} y={y} width={w} height={Math.max(0, h)} fill="#3b82f6" rx={1} />;
+          })}
+          {bars.map((b, i) =>
+            i % labelStep === 0 ? (
+              <text
+                key={`l${i}`}
+                x={i * barW + barW / 2}
+                y={height - 6}
+                textAnchor="middle"
+                style={{ fontSize: 9, fill: '#64748b', fontFamily: 'inherit' }}
+              >
+                {b.freq}
+              </text>
+            ) : null
+          )}
+        </svg>
+      </div>
     </div>
   );
 }

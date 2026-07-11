@@ -2,7 +2,6 @@ import { createContext, useContext, useEffect, useState, ReactNode } from 'react
 import { supabase } from '../lib/supabase';
 
 interface AuthUser { id: string; email: string; }
-
 interface AuthContextValue {
   user: AuthUser | null;
   loading: boolean;
@@ -39,16 +38,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { error } = await supabase.auth.signUp({ email, password });
     return { error: error?.message ?? null };
   }
-  async function signOut() {
-    await supabase.auth.signOut();
-    setUser(null);
-  }
+  async function signOut() { await supabase.auth.signOut(); setUser(null); }
 
-  return (
-    <AuthContext.Provider value={{ user, loading, signIn, signUp, signOut }}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={{ user, loading, signIn, signUp, signOut }}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {
