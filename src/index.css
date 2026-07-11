@@ -261,3 +261,22 @@ body {
 .val-red { color: #f87171; }
 .val-orange { color: #fb923c; }
 .val-cyan { color: #22d3ee; }
+
+/* Toast + panel animations */
+@keyframes toast-slide-in {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes panel-slide-in {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+/* Spin animation */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.animate-spin {
+  animation: spin 0.6s linear infinite;
+}

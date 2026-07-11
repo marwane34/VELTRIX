@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { MonitoringProvider } from './contexts/MonitoringContext';
+import { ToastProvider } from './components/Toast';
 import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
 import { Dashboard } from './pages/Dashboard';
@@ -48,17 +49,18 @@ function AppContent() {
 
   return (
     <MonitoringProvider>
-      {appPage === 'dashboard' ? (
-        // Dashboard takes full screen (includes its own TitleBar + Sidebar)
-        <Dashboard onNavigate={(p) => setAppPage(p as AppPage)} />
-      ) : (
-        <AppLayout currentPage={appPage} onNavigate={setAppPage}>
-          {appPage === 'machines' && <MachinesPage />}
-          {appPage === 'sensors' && <SensorsPage />}
-          {appPage === 'alerts' && <AlertsPage />}
-          {appPage === 'analytics' && <AnalyticsPage />}
-        </AppLayout>
-      )}
+      <ToastProvider>
+        {appPage === 'dashboard' ? (
+          <Dashboard onNavigate={(p) => setAppPage(p as AppPage)} />
+        ) : (
+          <AppLayout currentPage={appPage} onNavigate={setAppPage}>
+            {appPage === 'machines' && <MachinesPage />}
+            {appPage === 'sensors' && <SensorsPage />}
+            {appPage === 'alerts' && <AlertsPage />}
+            {appPage === 'analytics' && <AnalyticsPage />}
+          </AppLayout>
+        )}
+      </ToastProvider>
     </MonitoringProvider>
   );
 }
