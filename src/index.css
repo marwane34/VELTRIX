@@ -262,6 +262,18 @@ body {
 .val-orange { color: #fb923c; }
 .val-cyan { color: #22d3ee; }
 
+/* Dark-mode select dropdown options */
+select option {
+  background: #0e1726;
+  color: #e2e8f0;
+}
+
+/* Checkbox styling */
+input[type="checkbox"] {
+  accent-color: #3b82f6;
+  cursor: pointer;
+}
+
 /* Toast + panel animations */
 @keyframes toast-slide-in {
   from { transform: translateX(100%); opacity: 0; }

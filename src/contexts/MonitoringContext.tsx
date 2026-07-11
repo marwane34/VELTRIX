@@ -9,6 +9,15 @@ import { runAIAnalysis } from '../hooks/useAI';
 import type { Machine, Alert, AIAnalysis, Sensor, Setting } from '../types';
 import type { VibrationPoint, FreqBar, TrendPoint } from '../hooks/useSimulatedData';
 
+export interface LiveReading {
+  temperature?: number;
+  rmsX?: number;
+  rmsY?: number;
+  current?: number;
+  rpm?: number;
+  voltage?: number;
+}
+
 interface MonitoringContextValue {
   machines: Machine[];
   selectedMachine: Machine | null;
@@ -38,6 +47,9 @@ interface MonitoringContextValue {
   markAlertsRead: () => Promise<void>;
   persistSnapshot: () => Promise<void>;
   saveSetting: (key: string, value: string, category?: string) => Promise<void>;
+  liveReading: LiveReading | null;
+  pushLiveReading: (reading: LiveReading) => void;
+  dataSource: 'simulated' | 'live';
 }
 
 const MonitoringContext = createContext<MonitoringContextValue | null>(null);
@@ -51,25 +63,43 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
   const [recentAlerts, setRecentAlerts] = useState<Alert[]>([]);
   const [sensors, setSensors] = useState<Sensor[]>([]);
   const [settings, setSettings] = useState<Setting[]>([]);
+  const [liveReading, setLiveReading] = useState<LiveReading | null>(null);
+  const liveReadingRef = useRef<LiveReading | null>(null);
+  liveReadingRef.current = liveReading;
 
   const anomalyLevel = simulateLoad ? 0.75 : 0.35;
   const simData = useSimulatedData(monitoring, anomalyLevel);
 
   const selectedMachine = machines.find((m) => m.id === selectedMachineId) ?? machines[0] ?? null;
 
-  // AI analysis on every tick
+  const dataSource: 'simulated' | 'live' = liveReading ? 'live' : 'simulated';
+
+  const displayTemp = liveReading?.temperature ?? simData.temperature;
+  const displayRmsX = liveReading?.rmsX ?? simData.rmsX;
+  const displayRmsY = liveReading?.rmsY ?? simData.rmsY;
+  const displayCurrent = liveReading?.current ?? simData.currentVal;
+  const displayRpm = liveReading?.rpm ?? simData.rpm;
+
+  // AI analysis on every tick — uses live data when available, simulated otherwise
   const aiAnalysis: AIAnalysis | null = selectedMachine
     ? runAIAnalysis(
         {
-          temperature: simData.temperature,
-          rmsX: simData.rmsX,
-          rmsY: simData.rmsY,
-          current: simData.currentVal,
-          rpm: simData.rpm,
+          temperature: displayTemp,
+          rmsX: displayRmsX,
+          rmsY: displayRmsY,
+          current: displayCurrent,
+          rpm: displayRpm,
         },
         selectedMachine
       )
     : null;
+
+  function pushLiveReading(reading: LiveReading) {
+    setLiveReading(reading);
+    // Clear live reading after 10s of no data to fall back to simulated
+    if (liveReadingRef.current) clearTimeout(liveReadingTimeoutRef.current);
+    liveReadingTimeoutRef.current = setTimeout(() => setLiveReading(null), 10000);
+  }
 
   async function refreshMachines() {
     if (!user) return;
@@ -132,6 +162,7 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
   // Persist snapshot every 5s when monitoring
   const persistTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastAlertRef = useRef<number>(0);
+  const liveReadingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   async function persistSnapshot() {
     if (!user || !selectedMachine) return;
@@ -139,22 +170,22 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
     await supabase.from('sensor_snapshots').insert({
       machine_id: selectedMachine.id,
       user_id: user.id,
-      temperature: simData.temperature,
-      vibration_rms: +((simData.rmsX + simData.rmsY) / 2).toFixed(3),
-      current: simData.currentVal,
-      rpm: simData.rpm,
-      voltage: 220 + (Math.random() - 0.5) * 5,
+      temperature: displayTemp,
+      vibration_rms: +((displayRmsX + displayRmsY) / 2).toFixed(3),
+      current: displayCurrent,
+      rpm: displayRpm,
+      voltage: liveReading?.voltage ?? 220 + (Math.random() - 0.5) * 5,
     });
 
     // Write to sensor_data table for each sensor type
     const machineSensors = sensors.filter((s) => s.machine_id === selectedMachine.id);
     if (machineSensors.length > 0) {
       const sensorReadings: Record<string, number> = {
-        vibration: +((simData.rmsX + simData.rmsY) / 2).toFixed(3),
-        temperature: simData.temperature,
-        current: simData.currentVal,
-        rpm: simData.rpm,
-        voltage: 220 + (Math.random() - 0.5) * 5,
+        vibration: +((displayRmsX + displayRmsY) / 2).toFixed(3),
+        temperature: displayTemp,
+        current: displayCurrent,
+        rpm: displayRpm,
+        voltage: liveReading?.voltage ?? 220 + (Math.random() - 0.5) * 5,
       };
       const sensorUnits: Record<string, string> = {
         vibration: 'g', temperature: '°C', current: 'A', rpm: 'RPM', voltage: 'V',
@@ -177,12 +208,12 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
     await supabase.from('machine_health').upsert({
       machine_id: selectedMachine.id,
       user_id: user.id,
-      rms_x: simData.rmsX,
-      rms_y: simData.rmsY,
-      temperature: simData.temperature,
-      current: simData.currentVal,
-      rpm: simData.rpm,
-      voltage: 220,
+      rms_x: displayRmsX,
+      rms_y: displayRmsY,
+      temperature: displayTemp,
+      current: displayCurrent,
+      rpm: displayRpm,
+      voltage: liveReading?.voltage ?? 220,
       health_score: aiAnalysis?.healthScore ?? 100,
       status: aiAnalysis?.status ?? 'healthy',
       updated_at: new Date().toISOString(),
@@ -225,7 +256,7 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
     return () => {
       if (persistTimerRef.current) clearInterval(persistTimerRef.current);
     };
-  }, [monitoring, selectedMachine, simData.temperature, simData.currentVal, simData.rpm, aiAnalysis]);
+  }, [monitoring, selectedMachine, displayTemp, displayCurrent, displayRpm, aiAnalysis]);
 
   function selectMachine(id: string) {
     setSelectedMachineId(id);
@@ -250,6 +281,11 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
         simulateLoad,
         setSimulateLoad,
         ...simData,
+        temperature: displayTemp,
+        currentVal: displayCurrent,
+        rmsX: displayRmsX,
+        rmsY: displayRmsY,
+        rpm: displayRpm,
         aiAnalysis,
         recentAlerts,
         unreadCount,
@@ -261,6 +297,9 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
         settings,
         markAlertsRead,
         persistSnapshot,
+        liveReading,
+        pushLiveReading,
+        dataSource,
       }}
     >
       {children}

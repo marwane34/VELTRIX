@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { MonitoringProvider } from './contexts/MonitoringContext';
+import { CommunicationProvider } from './contexts/CommunicationContext';
 import { ToastProvider } from './components/Toast';
 import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
@@ -9,10 +10,11 @@ import { MachinesPage } from './pages/MachinesPage';
 import { SensorsPage } from './pages/SensorsPage';
 import { AlertsPage } from './pages/AlertsPage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
+import { CommunicationPage } from './pages/CommunicationPage';
 import { AppLayout } from './components/AppLayout';
 
 type AuthPage = 'login' | 'register';
-type AppPage = 'dashboard' | 'machines' | 'sensors' | 'alerts' | 'analytics';
+type AppPage = 'dashboard' | 'machines' | 'sensors' | 'alerts' | 'analytics' | 'communication';
 
 function AppContent() {
   const { user, loading } = useAuth();
@@ -49,18 +51,21 @@ function AppContent() {
 
   return (
     <MonitoringProvider>
-      <ToastProvider>
-        {appPage === 'dashboard' ? (
-          <Dashboard onNavigate={(p) => setAppPage(p as AppPage)} />
-        ) : (
-          <AppLayout currentPage={appPage} onNavigate={setAppPage}>
-            {appPage === 'machines' && <MachinesPage />}
-            {appPage === 'sensors' && <SensorsPage />}
-            {appPage === 'alerts' && <AlertsPage />}
-            {appPage === 'analytics' && <AnalyticsPage />}
-          </AppLayout>
-        )}
-      </ToastProvider>
+      <CommunicationProvider>
+        <ToastProvider>
+          {appPage === 'dashboard' ? (
+            <Dashboard onNavigate={(p) => setAppPage(p as AppPage)} />
+          ) : (
+            <AppLayout currentPage={appPage} onNavigate={setAppPage}>
+              {appPage === 'machines' && <MachinesPage />}
+              {appPage === 'sensors' && <SensorsPage />}
+              {appPage === 'alerts' && <AlertsPage />}
+              {appPage === 'analytics' && <AnalyticsPage />}
+              {appPage === 'communication' && <CommunicationPage />}
+            </AppLayout>
+          )}
+        </ToastProvider>
+      </CommunicationProvider>
     </MonitoringProvider>
   );
 }
