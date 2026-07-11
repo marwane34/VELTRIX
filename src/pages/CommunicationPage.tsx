@@ -1,9 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import {
-  Usb, Wifi, Radio, Network, Server, Globe, Plus, Trash2, Play, Square,
-  RefreshCw, Save, CheckCircle, XCircle, Loader2, AlertTriangle, ChevronDown,
-  Activity, Settings as SettingsIcon, X, Search,
-} from 'lucide-react';
+import { Usb, Wifi, Radio, Network, Server, Globe, Plus, Trash2, Play, Square, RefreshCw, Save, CircleCheck as CheckCircle, Circle as XCircle, Loader as Loader2, TriangleAlert as AlertTriangle, ChevronDown, Activity, Settings as SettingsIcon, X, Search } from 'lucide-react';
 import {
   useCommunication,
   CommMethod, CommConfig, ConnStatus, CommSetting, METHOD_LABELS,

@@ -1,4 +1,4 @@
-import { Monitor, BarChart2, ChevronUp, PlusCircle } from 'lucide-react';
+import { Monitor, ChartBar as BarChart2, ChevronUp, CirclePlus as PlusCircle } from 'lucide-react';
 import { useMonitoring } from '../contexts/MonitoringContext';
 
 interface Props {

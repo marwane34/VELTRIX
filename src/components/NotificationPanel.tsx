@@ -1,4 +1,4 @@
-import { X, Bell, AlertTriangle, AlertCircle, Info } from 'lucide-react';
+import { X, Bell, TriangleAlert as AlertTriangle, CircleAlert as AlertCircle, Info } from 'lucide-react';
 import { useMonitoring } from '../contexts/MonitoringContext';
 import type { Alert, AlertSeverity } from '../types';
 

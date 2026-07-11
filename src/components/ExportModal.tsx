@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Download, Loader2, FileText, FileJson } from 'lucide-react';
+import { X, Download, Loader as Loader2, FileText, FileJson } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import type { Machine, SensorSnapshot } from '../types';
 

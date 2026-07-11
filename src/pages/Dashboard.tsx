@@ -1,8 +1,5 @@
 import { useState, useEffect } from 'react';
-import {
-  ChevronDown, BarChart2, RefreshCw, Save, Upload, Settings, Database, Layers,
-  SlidersHorizontal, AlignJustify, Plus, AlertTriangle, Bell, Wifi,
-} from 'lucide-react';
+import { ChevronDown, ChartBar as BarChart2, RefreshCw, Save, Upload, Settings, Database, Layers, SlidersHorizontal, AlignJustify, Plus, TriangleAlert as AlertTriangle, Bell, Wifi } from 'lucide-react';
 import { Sidebar } from '../components/Sidebar';
 import VibrationChart from '../components/VibrationChart';
 import FrequencyChart from '../components/FrequencyChart';

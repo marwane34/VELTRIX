@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { Bell, AlertTriangle, CheckCircle, XCircle, Search } from 'lucide-react';
+import { Bell, TriangleAlert as AlertTriangle, CircleCheck as CheckCircle, Circle as XCircle, Search } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useMonitoring } from '../contexts/MonitoringContext';
 import type { Alert, AlertSeverity } from '../types';

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Loader2, Clock } from 'lucide-react';
+import { X, Loader as Loader2, Clock } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import type { Machine, SensorSnapshot } from '../types';
 

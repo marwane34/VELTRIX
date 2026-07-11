@@ -1,4 +1,4 @@
-import { Activity, AlertTriangle, ShieldCheck, Wrench, Thermometer, Zap, Clock, Lightbulb } from 'lucide-react';
+import { Activity, TriangleAlert as AlertTriangle, ShieldCheck, Wrench, Thermometer, Zap, Clock, Lightbulb } from 'lucide-react';
 import { useMonitoring } from '../contexts/MonitoringContext';
 
 const COLORS = {
