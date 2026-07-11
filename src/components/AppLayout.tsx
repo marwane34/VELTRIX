@@ -1,9 +1,9 @@
 import { ReactNode } from 'react';
-import { LayoutDashboard, Cpu, Bell, TrendingUp, LogOut, Wifi, Radio } from 'lucide-react';
+import { LayoutDashboard, Cpu, Bell, TrendingUp, LogOut, Radio } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useMonitoring } from '../contexts/MonitoringContext';
 
-type Page = 'dashboard' | 'machines' | 'sensors' | 'alerts' | 'analytics' | 'communication';
+type Page = 'dashboard' | 'machines' | 'alerts' | 'analytics' | 'communication';
 
 interface Props {
   currentPage: Page;
@@ -14,7 +14,6 @@ interface Props {
 const NAV_ITEMS = [
   { id: 'dashboard' as Page, icon: LayoutDashboard, label: 'Dashboard' },
   { id: 'machines' as Page, icon: Cpu, label: 'Machines' },
-  { id: 'sensors' as Page, icon: Wifi, label: 'Sensors' },
   { id: 'alerts' as Page, icon: Bell, label: 'Alerts' },
   { id: 'analytics' as Page, icon: TrendingUp, label: 'Analytics' },
   { id: 'communication' as Page, icon: Radio, label: 'Communication' },

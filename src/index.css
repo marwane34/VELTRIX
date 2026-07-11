@@ -41,49 +41,35 @@ body {
   flex-direction: column;
   background: var(--bg-base);
   overflow: hidden;
+  border-radius: 6px;
+  border: 1px solid #0d1525;
+  box-shadow: 0 0 60px rgba(0,0,0,0.6);
 }
 
-/* Title bar */
+/* Title bar — frameless modern SCADA */
 .title-bar {
-  background: linear-gradient(180deg, #1a2540 0%, #0d1220 100%);
+  background: linear-gradient(180deg, #0d1525 0%, #080d14 100%);
   border-bottom: 1px solid var(--border-subtle);
-  height: 36px;
+  height: 32px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 12px;
   flex-shrink: 0;
   user-select: none;
+  -webkit-app-region: drag;
+  app-region: drag;
 }
 
 .title-bar-title {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   color: #c8d6ea;
   letter-spacing: 0.5px;
   position: absolute;
   left: 50%;
   transform: translateX(-50%);
-}
-
-.title-bar-controls {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  margin-left: auto;
-}
-
-.win-btn {
-  width: 18px;
-  height: 18px;
-  border: 1px solid #2a3f60;
-  background: linear-gradient(180deg, #1e2d45 0%, #141e30 100%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  font-size: 9px;
-  color: #94a3b8;
+  pointer-events: none;
 }
 
 /* Main layout */

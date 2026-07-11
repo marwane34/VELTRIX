@@ -76,32 +76,15 @@ export function Sidebar({ onAddMachine, onSaveSettings }: Props) {
         </div>
         <div className="flex items-center justify-between px-2 py-1" style={{ background: '#0d1520', border: '1px solid #1e2d45' }}>
           <span className="text-slate-400">Temp:</span>
-          <span>
-            <span className="val-green"> {selectedMachine?.temp_min ?? 40}</span>
-            <span className="text-slate-500"> °C </span>
-            <span className="text-slate-400">Y:</span>
-            <span className="val-orange"> {temperature.toFixed(0)}°c</span>
-          </span>
+          <span className="val-orange"> {temperature.toFixed(0)}°C</span>
         </div>
         <div className="flex items-center justify-between px-2 py-1" style={{ background: '#0d1520', border: '1px solid #1e2d45' }}>
           <span className="text-slate-400">Current:</span>
-          <span>
-            <span className="text-slate-300"> {selectedMachine?.current_min ?? 1.0} </span>
-            <span className="text-slate-500">+-</span>
-            <span className="val-yellow"> {currentVal.toFixed(1)} A</span>
-          </span>
+          <span className="val-yellow"> {currentVal.toFixed(1)} A</span>
         </div>
       </div>
 
-      {/* Save Settings button */}
-      <div className="px-3 py-2" style={{ borderBottom: '1px solid #1e2d45' }}>
-        <button onClick={onSaveSettings} className="w-full py-1.5 text-xs font-medium text-slate-300 cursor-pointer"
-          style={{ background: 'linear-gradient(180deg,#1a2540 0%,#111827 100%)', border: '1px solid #2a3f60' }}>
-          Save Settings
-        </button>
-      </div>
 
-      {/* General Settings section */}
       <div className="px-3 py-2 flex-1">
         <div className="text-yellow-500 font-semibold text-xs mb-2 tracking-wide uppercase" style={{ fontSize: 10 }}>
           General Settings

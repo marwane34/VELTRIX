@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import {
-  Minus, Square, X, ChevronDown, BarChart2,
+  ChevronDown, BarChart2,
   RefreshCw, Save, Upload, Settings,
   Database, Layers, SlidersHorizontal, AlignJustify,
   Plus, AlertTriangle, Bell, Wifi,
@@ -378,14 +378,30 @@ export function Dashboard({ onNavigate }: Props) {
 
   return (
     <div className="dashboard-root">
-      {/* Title Bar */}
-      <div className="title-bar">
-        <div style={{ width: 80 }} />
+      {/* Custom Frameless Title Bar */}
+      <div
+        className="title-bar"
+        onDoubleClick={() => {
+          if (document.fullscreenElement) document.exitFullscreen();
+          else document.documentElement.requestFullscreen?.();
+        }}
+        style={{ cursor: 'default' }}
+      >
+        <div className="flex items-center gap-2" style={{ width: 200 }}>
+          <img
+            src="/assets/veltrix-logo.jpeg"
+            alt="VELTRIX"
+            style={{ width: 16, height: 16, objectFit: 'contain' }}
+          />
+          <span style={{ fontSize: 11, fontWeight: 600, color: '#94a3b8', letterSpacing: '0.5px' }}>
+            VELTRIX
+          </span>
+        </div>
         <span className="title-bar-title">Predictive Maintenance Dashboard</span>
-        <div className="title-bar-controls">
-          <button className="win-btn"><Minus size={8} /></button>
-          <button className="win-btn"><Square size={7} /></button>
-          <button className="win-btn" style={{ borderColor: '#5a2020' }}><X size={8} /></button>
+        <div style={{ width: 200, display: 'flex', justifyContent: 'flex-end' }}>
+          <span style={{ fontSize: 9, color: '#4a5f7a', letterSpacing: '0.3px' }}>
+            {monitoring ? '● LIVE' : '○ IDLE'}
+          </span>
         </div>
       </div>
 
