@@ -1,74 +1,124 @@
-import { Monitor, ChartBar as BarChart2, ChevronUp, CirclePlus as PlusCircle } from 'lucide-react';
+import { Plus, Cpu, CircleDot } from 'lucide-react';
 import { useMonitoring } from '../contexts/MonitoringContext';
 
-interface Props {
+interface SidebarProps {
   onAddMachine: () => void;
   onSaveSettings: () => void;
 }
 
-export function Sidebar({ onAddMachine, onSaveSettings }: Props) {
+export function Sidebar({ onAddMachine }: SidebarProps) {
   const { machines, selectedMachine, selectMachine, temperature, currentVal, rmsX, rmsY } = useMonitoring();
 
   return (
-    <div className="sidebar flex flex-col h-full text-xs select-none">
-      <div className="flex items-center justify-between px-3 py-2" style={{ borderBottom: '1px solid #1e2d45', background: 'linear-gradient(180deg,#182030 0%,#111827 100%)' }}>
-        <div className="flex items-center gap-2">
-          <Monitor size={13} className="text-blue-400" />
-          <span className="font-semibold text-sm text-slate-200 truncate max-w-28">{selectedMachine?.name ?? 'No Machine'}</span>
-        </div>
-        <ChevronUp size={13} className="text-slate-500" />
+    <div className="sidebar">
+      {/* Machine list header */}
+      <div style={{
+        padding: '8px 12px',
+        borderBottom: '1px solid #1e2d45',
+        display: 'flex', alignItems: 'center', gap: 6,
+        background: 'linear-gradient(180deg, #111827 0%, #0d1220 100%)',
+      }}>
+        <Cpu size={13} color="#3b82f6" />
+        <span style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', letterSpacing: '1px' }}>
+          MACHINES
+        </span>
+        <span style={{
+          fontSize: 9, fontWeight: 700, color: '#3b82f6',
+          background: '#3b82f620', padding: '1px 6px', borderRadius: 8,
+          marginLeft: 'auto',
+        }}>
+          {machines.length}
+        </span>
       </div>
 
-      <div style={{ borderBottom: '1px solid #1e2d45' }}>
+      {/* Machine list */}
+      <div style={{ flex: 1, overflowY: 'auto' }}>
         {machines.length === 0 ? (
-          <div className="px-3 py-4 text-center text-slate-600 text-xs">No machines. Add one below.</div>
+          <div style={{
+            padding: 20, textAlign: 'center', color: '#64748b', fontSize: 11,
+          }}>
+            No machines yet.
+            <br />
+            Click "Add Machine" below.
+          </div>
         ) : (
           machines.map((machine) => {
-            const isActive = machine.id === selectedMachine?.id;
+            const isActive = selectedMachine?.id === machine.id;
+            const statusColor =
+              machine.status === 'online' ? '#22c55e' :
+              machine.status === 'warning' ? '#eab308' :
+              machine.status === 'critical' ? '#ef4444' : '#64748b';
+
             return (
-              <div key={machine.id} onClick={() => selectMachine(machine.id)} className="flex items-center justify-between px-3 py-2 cursor-pointer transition-colors"
-                style={isActive ? { background: 'linear-gradient(90deg,rgba(34,197,94,0.08),rgba(34,197,94,0.02))', borderLeft: '2px solid #22c55e' } : { paddingLeft: 14 }}
-                onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; }}
-                onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = ''; }}>
-                <div className="flex items-center gap-2">
-                  <BarChart2 size={12} className={isActive ? 'text-blue-400' : 'text-slate-500'} />
-                  <span className={isActive ? 'text-slate-200 font-medium' : 'text-slate-400'}>{machine.name}</span>
+              <div
+                key={machine.id}
+                onClick={() => selectMachine(machine.id)}
+                className={isActive ? 'machine-active' : ''}
+                style={{
+                  padding: '8px 12px',
+                  cursor: 'pointer',
+                  borderBottom: '1px solid #111827',
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  transition: 'background 0.1s',
+                  background: isActive ? undefined : 'transparent',
+                }}
+                onMouseEnter={(e) => {
+                  if (!isActive) e.currentTarget.style.background = '#111827';
+                }}
+                onMouseLeave={(e) => {
+                  if (!isActive) e.currentTarget.style.background = 'transparent';
+                }}
+              >
+                {/* Status indicator */}
+                <CircleDot
+                  size={10}
+                  color={statusColor}
+                  className={isActive ? 'status-dot-active' : ''}
+                  style={{ flexShrink: 0 }}
+                />
+
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    fontSize: 11, fontWeight: 600,
+                    color: isActive ? '#e2e8f0' : '#94a3b8',
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                  }}>
+                    {machine.name}
+                  </div>
+                  <div style={{ fontSize: 9, color: '#64748b', marginTop: 1 }}>
+                    {machine.location || '—'}
+                  </div>
+                  {isActive && (
+                    <div style={{
+                      display: 'flex', gap: 8, marginTop: 4,
+                      fontSize: 8.5, color: '#64748b',
+                    }}>
+                      <span><span className="val-orange">T</span> {temperature.toFixed(0)}°</span>
+                      <span><span className="val-yellow">I</span> {currentVal.toFixed(1)}A</span>
+                      <span><span className="val-blue">V</span> {((rmsX + rmsY) / 2).toFixed(2)}</span>
+                    </div>
+                  )}
                 </div>
-                {isActive && <div className="status-dot-active rounded-full" style={{ width: 8, height: 8, background: '#22c55e', boxShadow: '0 0 4px #22c55e', flexShrink: 0 }} />}
               </div>
             );
           })
         )}
       </div>
 
-      <div className="px-3 py-2 space-y-1.5" style={{ borderBottom: '1px solid #1e2d45' }}>
-        <div className="flex items-center justify-between px-2 py-1" style={{ background: '#0d1520', border: '1px solid #1e2d45' }}>
-          <span className="text-slate-400">RMS:</span>
-          <span><span className="text-slate-300">X:</span><span className="val-blue"> {rmsX.toFixed(2)}</span><span className="text-slate-500">g </span><span className="text-slate-400">Y:</span><span className="val-cyan"> {rmsY.toFixed(2)}g</span></span>
-        </div>
-        <div className="flex items-center justify-between px-2 py-1" style={{ background: '#0d1520', border: '1px solid #1e2d45' }}>
-          <span className="text-slate-400">Temp:</span>
-          <span className="val-orange"> {temperature.toFixed(0)}°C</span>
-        </div>
-        <div className="flex items-center justify-between px-2 py-1" style={{ background: '#0d1520', border: '1px solid #1e2d45' }}>
-          <span className="text-slate-400">Current:</span>
-          <span className="val-yellow"> {currentVal.toFixed(1)} A</span>
-        </div>
-      </div>
-
-      <div className="px-3 py-2 flex-1">
-        <div className="text-yellow-500 font-semibold text-xs mb-2 tracking-wide uppercase" style={{ fontSize: 10 }}>General Settings</div>
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between"><span className="text-slate-400">Vibration RMS</span><span className="val-blue">{selectedMachine?.rms_min ?? 0.8} - {selectedMachine?.rms_max ?? 2.2} g</span></div>
-          <div className="flex items-center justify-between"><span className="text-slate-400">Temperature:</span><span className="val-green">{selectedMachine?.temp_min ?? 40} - {selectedMachine?.temp_max ?? 80}°c</span></div>
-          <div className="flex items-center justify-between"><span className="text-slate-400">Current:</span><span><span className="val-blue">{selectedMachine?.current_min ?? 1.0} </span><span className="text-slate-500">+ </span><span className="val-yellow">{selectedMachine?.current_max ?? 3.5} A</span></span></div>
-        </div>
-        <button onClick={onSaveSettings} className="w-full py-1.5 mt-3 text-xs font-semibold cursor-pointer" style={{ background: 'linear-gradient(180deg,#1a4a1a 0%,#0f2e0f 100%)', border: '1px solid #22c55e', color: '#22c55e' }}>Save Settings</button>
-      </div>
-
-      <div onClick={onAddMachine} className="px-3 py-2 flex items-center justify-center gap-1.5 cursor-pointer transition-colors" style={{ borderTop: '1px solid #1e2d45' }}
-        onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; }} onMouseLeave={(e) => { e.currentTarget.style.background = ''; }}>
-        <PlusCircle size={11} className="text-slate-400" /><span className="text-slate-400">Add Machine</span>
+      {/* Add Machine button */}
+      <div style={{
+        padding: '10px 12px',
+        borderTop: '1px solid #1e2d45',
+        flexShrink: 0,
+      }}>
+        <button
+          onClick={onAddMachine}
+          className="btn-secondary"
+          style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+        >
+          <Plus size={13} />
+          Add Machine
+        </button>
       </div>
     </div>
   );

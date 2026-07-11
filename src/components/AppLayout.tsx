@@ -1,56 +1,159 @@
-import { ReactNode } from 'react';
-import { LayoutDashboard, Cpu, Bell, TrendingUp, LogOut, Radio } from 'lucide-react';
+import { ReactNode, useState } from 'react';
+import { LayoutDashboard, Cpu, Bell, TrendingUp, Radio, LogOut, Activity } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useMonitoring } from '../contexts/MonitoringContext';
 
-type Page = 'dashboard' | 'machines' | 'alerts' | 'analytics' | 'communication';
+export type NavItem = 'dashboard' | 'machines' | 'alerts' | 'analytics' | 'communication';
 
-interface Props {
-  currentPage: Page;
-  onNavigate: (page: Page) => void;
+interface AppLayoutProps {
   children: ReactNode;
+  activeNav: NavItem;
+  onNavigate: (item: NavItem) => void;
+  onOpenNotifications: () => void;
 }
 
-const NAV_ITEMS = [
-  { id: 'dashboard' as Page, icon: LayoutDashboard, label: 'Dashboard' },
-  { id: 'machines' as Page, icon: Cpu, label: 'Machines' },
-  { id: 'alerts' as Page, icon: Bell, label: 'Alerts' },
-  { id: 'analytics' as Page, icon: TrendingUp, label: 'Analytics' },
-  { id: 'communication' as Page, icon: Radio, label: 'Communication' },
+const NAV_ITEMS: { id: NavItem; label: string; icon: typeof LayoutDashboard }[] = [
+  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { id: 'machines', label: 'Machines', icon: Cpu },
+  { id: 'alerts', label: 'Alerts', icon: Bell },
+  { id: 'analytics', label: 'Analytics', icon: TrendingUp },
+  { id: 'communication', label: 'Communication', icon: Radio },
 ];
 
-export function AppLayout({ currentPage, onNavigate, children }: Props) {
+export function AppLayout({ children, activeNav, onNavigate, onOpenNotifications }: AppLayoutProps) {
   const { signOut } = useAuth();
   const { unreadCount } = useMonitoring();
+  const [hovered, setHovered] = useState<NavItem | null>(null);
 
   return (
-    <div className="flex h-screen" style={{ background: '#0b0f1a', overflow: 'hidden' }}>
-      <div className="flex flex-col items-center py-2 gap-1 shrink-0" style={{ width: 44, background: '#07090f', borderRight: '1px solid #1e2d45' }}>
-        <div className="flex items-center justify-center w-8 h-8 mb-2" style={{ background: 'linear-gradient(135deg,#0d3060 0%,#061830 100%)', border: '1px solid #1e4080' }}>
-          <img src="/assets/veltrix-logo.svg" alt="VELTRIX" style={{ width: 22, height: 22, objectFit: 'contain' }} />
+    <div className="dashboard-root">
+      {/* Top nav strip */}
+      <div style={{
+        height: 44,
+        minHeight: 44,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '0 12px',
+        background: 'linear-gradient(180deg, #0d1525 0%, #080d14 100%)',
+        borderBottom: '1px solid #1e2d45',
+        flexShrink: 0,
+      }}>
+        {/* Logo */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{
+            width: 28, height: 28, borderRadius: 4,
+            background: 'linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <Activity size={16} color="#fff" strokeWidth={2.5} />
+          </div>
+          <span style={{
+            fontSize: 15, fontWeight: 800, letterSpacing: '2px',
+            background: 'linear-gradient(90deg, #3b82f6, #06b6d4)',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            backgroundClip: 'text',
+          }}>
+            VELTRIX
+          </span>
+          <span style={{ fontSize: 8, color: '#64748b', letterSpacing: '1px', marginTop: 4 }}>
+            SCADA
+          </span>
         </div>
-        {NAV_ITEMS.map(({ id, icon: Icon, label }) => {
-          const isActive = currentPage === id;
-          return (
-            <button key={id} onClick={() => onNavigate(id)} title={label} className="relative w-8 h-8 flex items-center justify-center transition-all"
-              style={{ background: isActive ? 'linear-gradient(180deg,#1a3a6a 0%,#0f2040 100%)' : 'transparent', border: `1px solid ${isActive ? '#3b82f6' : 'transparent'}`, color: isActive ? '#60a5fa' : '#4a5f7a' }}
-              onMouseEnter={(e) => { if (!isActive) { e.currentTarget.style.color = '#94a3b8'; e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; } }}
-              onMouseLeave={(e) => { if (!isActive) { e.currentTarget.style.color = '#4a5f7a'; e.currentTarget.style.background = 'transparent'; } }}>
-              <Icon size={14} />
-              {id === 'alerts' && unreadCount > 0 && (
-                <span className="absolute top-0 right-0 flex items-center justify-center" style={{ width: 12, height: 12, background: '#ef4444', borderRadius: '50%', fontSize: 7, color: '#fff', fontWeight: 'bold' }}>
-                  {unreadCount > 9 ? '9' : unreadCount}
-                </span>
-              )}
-            </button>
-          );
-        })}
-        <div className="flex-1" />
-        <button onClick={signOut} title="Sign Out" className="w-8 h-8 flex items-center justify-center text-slate-600 hover:text-red-400 transition-colors">
-          <LogOut size={13} />
-        </button>
+
+        {/* Nav items */}
+        <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+          {NAV_ITEMS.map((item) => {
+            const Icon = item.icon;
+            const active = activeNav === item.id;
+            const isHovered = hovered === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => onNavigate(item.id)}
+                onMouseEnter={() => setHovered(item.id)}
+                onMouseLeave={() => setHovered(null)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '6px 12px',
+                  background: active ? '#3b82f615' : 'transparent',
+                  border: '1px solid',
+                  borderColor: active ? '#3b82f6' : 'transparent',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  color: active ? '#60a5fa' : isHovered ? '#94a3b8' : '#64748b',
+                  fontSize: 11, fontWeight: 600, letterSpacing: '0.5px',
+                  transition: 'all 0.15s',
+                  position: 'relative',
+                }}
+              >
+                <Icon size={13} />
+                {item.label}
+                {item.id === 'alerts' && unreadCount > 0 && (
+                  <span style={{
+                    position: 'absolute', top: -4, right: -4,
+                    minWidth: 16, height: 16, borderRadius: 8,
+                    background: '#ef4444', color: '#fff',
+                    fontSize: 9, fontWeight: 700,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    padding: '0 4px',
+                  }}>
+                    {unreadCount > 99 ? '99+' : unreadCount}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Right side: notifications + logout */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button
+            onClick={onOpenNotifications}
+            style={{
+              position: 'relative',
+              width: 30, height: 30,
+              background: '#1a2540', border: '1px solid #1e2d45',
+              borderRadius: 4, cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: '#94a3b8',
+            }}
+          >
+            <Bell size={14} />
+            {unreadCount > 0 && (
+              <span style={{
+                position: 'absolute', top: -4, right: -4,
+                minWidth: 14, height: 14, borderRadius: 7,
+                background: '#ef4444', color: '#fff',
+                fontSize: 8, fontWeight: 700,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                padding: '0 3px',
+              }}>
+                {unreadCount > 99 ? '99+' : unreadCount}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={signOut}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '6px 12px',
+              background: '#1a2540', border: '1px solid #1e2d45',
+              borderRadius: 4, cursor: 'pointer',
+              color: '#94a3b8', fontSize: 11, fontWeight: 600,
+            }}
+          >
+            <LogOut size={13} />
+            Logout
+          </button>
+        </div>
       </div>
-      <div className="flex-1 overflow-hidden">{children}</div>
+
+      {/* Content */}
+      <div style={{ flex: 1, overflow: 'hidden' }}>
+        {children}
+      </div>
     </div>
   );
 }

@@ -22,14 +22,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (session?.user) setUser({ id: session.user.id, email: session.user.email ?? '' });
       setLoading(false);
     });
-
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       (async () => {
         if (session?.user) setUser({ id: session.user.id, email: session.user.email ?? '' });
         else setUser(null);
       })();
     });
-
     return () => subscription.unsubscribe();
   }, []);
 
@@ -37,12 +35,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     return { error: error?.message ?? null };
   }
-
   async function signUp(email: string, password: string) {
     const { error } = await supabase.auth.signUp({ email, password });
     return { error: error?.message ?? null };
   }
-
   async function signOut() {
     await supabase.auth.signOut();
     setUser(null);

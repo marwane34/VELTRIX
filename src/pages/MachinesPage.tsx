@@ -1,538 +1,300 @@
-import { useState, useMemo, useEffect } from 'react';
-import {
-  Plus, Cpu, MapPin, Trash2, Settings2, Activity, Search,
-  Thermometer, Waves, Zap, Gauge, Battery, ChevronDown, ChevronUp, X,
-} from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import { useState, useEffect, useMemo } from 'react';
+import { Cpu, Plus, Search, Trash2, SlidersHorizontal, Activity, Thermometer, Zap, ChevronDown, ChevronUp, Gauge, MapPin } from 'lucide-react';
 import { useMonitoring } from '../contexts/MonitoringContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../components/Toast';
+import { supabase } from '../lib/supabase';
+import type { Machine, MachineStatus, Sensor } from '../types';
 import AddMachineModal from '../components/AddMachineModal';
 import SetLimitsModal from '../components/SetLimitsModal';
-import type { Machine, Sensor, MachineStatus } from '../types';
 
-/* ---------- constants ---------- */
-
-const SENSOR_TYPES: Sensor['type'][] = [
-  'vibration', 'temperature', 'current', 'frequency', 'rpm', 'voltage', 'pressure',
-];
-
-const SENSOR_UNITS: Record<string, string> = {
-  vibration: 'g',
-  temperature: '°C',
-  current: 'A',
-  frequency: 'Hz',
-  rpm: 'RPM',
-  voltage: 'V',
-  pressure: 'bar',
-};
-
-const STATUS_TABS: { key: MachineStatus | 'all'; label: string }[] = [
-  { key: 'all', label: 'All' },
-  { key: 'online', label: 'Online' },
-  { key: 'warning', label: 'Warning' },
-  { key: 'critical', label: 'Critical' },
-  { key: 'offline', label: 'Offline' },
-];
+type StatusFilter = 'all' | MachineStatus;
 
 const STATUS_COLORS: Record<MachineStatus, string> = {
   online: '#22c55e',
+  offline: '#64748b',
   warning: '#eab308',
   critical: '#ef4444',
-  offline: '#64748b',
 };
 
-const PAGE_SIZE = 8;
-
-/* ---------- small helpers ---------- */
-
-function sensorTypeIcon(type: Sensor['type']) {
-  switch (type) {
-    case 'vibration': return <Waves size={12} />;
-    case 'temperature': return <Thermometer size={12} />;
-    case 'current': return <Zap size={12} />;
-    case 'frequency': return <Activity size={12} />;
-    case 'rpm': return <Gauge size={12} />;
-    case 'voltage': return <Zap size={12} />;
-    case 'pressure': return <Gauge size={12} />;
-    default: return <Activity size={12} />;
-  }
-}
-
-function statusDot(status: MachineStatus) {
-  const color = STATUS_COLORS[status] ?? '#64748b';
-  return (
-    <span
-      className={status === 'online' ? 'status-dot-active' : ''}
-      style={{
-        display: 'inline-block',
-        width: 8, height: 8, borderRadius: '50%',
-        background: color,
-        boxShadow: `0 0 6px ${color}80`,
-        flexShrink: 0,
-      }}
-    />
-  );
-}
-
-/* ---------- main component ---------- */
+const PAGE_SIZE = 9;
 
 export function MachinesPage() {
-  const { machines, sensors, refreshMachines, refreshSensors, selectMachine } = useMonitoring();
+  const { machines, refreshMachines, sensors, refreshSensors, selectMachine, monitoring, setMonitoring } = useMonitoring();
   const { user } = useAuth();
-  const { toast } = useToast();
+  const { success, error } = useToast();
 
   const [showAdd, setShowAdd] = useState(false);
   const [limitsMachine, setLimitsMachine] = useState<Machine | null>(null);
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<MachineStatus | 'all'>('all');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [page, setPage] = useState(0);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
-  const [sensorDeleting, setSensorDeleting] = useState<string | null>(null);
-  const [sensorToggling, setSensorToggling] = useState<string | null>(null);
-
-  // inline add-sensor form per machine
-  const [sensorFormMachine, setSensorFormMachine] = useState<string | null>(null);
-  const [sensorForm, setSensorForm] = useState({
-    name: '',
-    type: 'vibration' as Sensor['type'],
-    channel: '',
-    samplingRate: '1000',
-  });
-  const [sensorSaving, setSensorSaving] = useState(false);
-
-  /* ----- derived ----- */
-
-  const filtered = useMemo(() => {
-    let list = machines;
-    if (statusFilter !== 'all') list = list.filter((m) => m.status === statusFilter);
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      list = list.filter(
-        (m) =>
-          m.name.toLowerCase().includes(q) ||
-          m.location.toLowerCase().includes(q) ||
-          m.description.toLowerCase().includes(q),
-      );
-    }
-    return list;
-  }, [machines, statusFilter, search]);
-
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const pageItems = filtered.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
 
   useEffect(() => {
-    if (page >= totalPages) setPage(totalPages - 1);
-  }, [totalPages, page]);
+    refreshMachines();
+    refreshSensors();
+  }, [refreshMachines, refreshSensors]);
 
-  const sensorsByMachine = useMemo(() => {
-    const map: Record<string, Sensor[]> = {};
-    for (const s of sensors) {
-      const mid = s.machine_id ?? '';
-      if (!map[mid]) map[mid] = [];
-      map[mid].push(s);
-    }
-    return map;
-  }, [sensors]);
-
-  /* ----- handlers ----- */
-
-  function toggleExpand(id: string) {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
+  const filtered = useMemo(() => {
+    return machines.filter((m) => {
+      if (statusFilter !== 'all' && m.status !== statusFilter) return false;
+      if (search.trim()) {
+        const q = search.toLowerCase();
+        return m.name.toLowerCase().includes(q) ||
+          m.location.toLowerCase().includes(q) ||
+          m.description.toLowerCase().includes(q);
+      }
+      return true;
     });
-  }
+  }, [machines, statusFilter, search]);
 
-  async function handleDeleteMachine(m: Machine) {
-    if (!confirm(`Delete machine "${m.name}"? This will also remove its sensors.`)) return;
-    setDeleting(m.id);
-    const { error } = await supabase.from('machines').delete().eq('id', m.id);
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+  const pageData = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
+  useEffect(() => { setPage(0); }, [search, statusFilter]);
+
+  async function handleDelete(machine: Machine) {
+    if (!confirm(`Delete machine "${machine.name}"? This cannot be undone.`)) return;
+    setDeleting(machine.id);
+    const { error: delError } = await supabase.from('machines').delete().eq('id', machine.id);
     setDeleting(null);
-    if (error) {
-      toast(error.message, 'error');
-      return;
+    if (delError) {
+      error(delError.message);
+    } else {
+      success('Machine deleted');
+      refreshMachines();
     }
-    await refreshMachines();
-    await refreshSensors();
-    toast('Machine deleted', 'success');
   }
 
-  function openSensorForm(machineId: string) {
-    setSensorFormMachine(machineId);
-    setSensorForm({ name: '', type: 'vibration', channel: '', samplingRate: '1000' });
+  function handleMonitor(machine: Machine) {
+    selectMachine(machine.id);
+    setMonitoring(true);
   }
 
-  async function handleAddSensor(machineId: string) {
-    if (!user) return;
-    if (!sensorForm.name.trim()) {
-      toast('Sensor name is required', 'error');
-      return;
-    }
-    setSensorSaving(true);
-    const { error } = await supabase.from('sensors').insert({
-      user_id: user.id,
-      machine_id: machineId,
-      name: sensorForm.name.trim(),
-      type: sensorForm.type,
-      channel: sensorForm.channel.trim() || `CH${Math.floor(Math.random() * 8) + 1}`,
-      unit: SENSOR_UNITS[sensorForm.type] ?? '',
-      status: 'active',
-      sampling_rate: parseInt(sensorForm.samplingRate, 10) || 1000,
-      min_value: 0,
-      max_value: 100,
-      description: '',
-    });
-    setSensorSaving(false);
-    if (error) {
-      toast(error.message, 'error');
-      return;
-    }
-    await refreshSensors();
-    toast('Sensor added', 'success');
-    setSensorFormMachine(null);
-  }
+  const machineSensors = (mid: string) => sensors.filter((s) => s.machine_id === mid);
 
-  async function handleToggleSensor(sensor: Sensor) {
-    const newStatus: Sensor['status'] = sensor.status === 'active' ? 'inactive' : 'active';
-    setSensorToggling(sensor.id);
-    const { error } = await supabase
-      .from('sensors')
-      .update({ status: newStatus, updated_at: new Date().toISOString() })
-      .eq('id', sensor.id);
-    setSensorToggling(null);
-    if (error) {
-      toast(error.message, 'error');
-      return;
-    }
-    await refreshSensors();
-    toast(`Sensor ${newStatus === 'active' ? 'activated' : 'deactivated'}`, 'success');
-  }
-
-  async function handleDeleteSensor(sensor: Sensor) {
-    if (!confirm(`Delete sensor "${sensor.name}"?`)) return;
-    setSensorDeleting(sensor.id);
-    const { error } = await supabase.from('sensors').delete().eq('id', sensor.id);
-    setSensorDeleting(null);
-    if (error) {
-      toast(error.message, 'error');
-      return;
-    }
-    await refreshSensors();
-    toast('Sensor deleted', 'success');
-  }
-
-  function handleMonitor(m: Machine) {
-    selectMachine(m.id);
-  }
-
-  /* ---------- render ---------- */
+  const statusTabs: { id: StatusFilter; label: string; count: number }[] = [
+    { id: 'all', label: 'All', count: machines.length },
+    { id: 'online', label: 'Online', count: machines.filter((m) => m.status === 'online').length },
+    { id: 'warning', label: 'Warning', count: machines.filter((m) => m.status === 'warning').length },
+    { id: 'critical', label: 'Critical', count: machines.filter((m) => m.status === 'critical').length },
+    { id: 'offline', label: 'Offline', count: machines.filter((m) => m.status === 'offline').length },
+  ];
 
   return (
-    <div className="flex flex-col h-full overflow-hidden" style={{ background: 'var(--bg-base)' }}>
-      {/* Header bar */}
-      <div
-        className="flex items-center justify-between px-4 py-3 flex-shrink-0"
-        style={{ background: 'linear-gradient(180deg,#0d1525 0%,#080d14 100%)', borderBottom: '1px solid var(--border-subtle)' }}
-      >
-        <div className="flex items-center gap-3">
-          <Cpu size={20} style={{ color: 'var(--accent-cyan)' }} />
-          <span className="text-sm font-semibold text-slate-200 tracking-wide">MACHINE MANAGEMENT</span>
-          <span
-            className="text-xs font-bold px-2 py-0.5"
-            style={{ background: '#0e1726', border: '1px solid var(--border-subtle)', color: 'var(--accent-cyan)', borderRadius: 3 }}
-          >
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {/* Header */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '10px 16px', borderBottom: '1px solid #1e2d45',
+        background: 'linear-gradient(180deg, #0d1220 0%, #080d14 100%)',
+        flexShrink: 0,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <Cpu size={18} color="#3b82f6" />
+          <span style={{ fontSize: 14, fontWeight: 700, color: '#e2e8f0', letterSpacing: '1px' }}>
+            MACHINE MANAGEMENT
+          </span>
+          <span style={{
+            fontSize: 10, fontWeight: 700, color: '#3b82f6',
+            background: '#3b82f620', padding: '2px 8px', borderRadius: 8,
+          }}>
             {machines.length}
           </span>
         </div>
-        <button className="btn-monitor flex items-center gap-1.5" onClick={() => setShowAdd(true)}>
-          <Plus size={14} /> Add Machine
+        <button className="btn-monitor" onClick={() => setShowAdd(true)} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Plus size={13} />
+          Add Machine
         </button>
       </div>
 
       {/* Filter bar */}
-      <div
-        className="flex items-center gap-3 px-4 py-2 flex-shrink-0"
-        style={{ background: '#0e1726', borderBottom: '1px solid var(--border-subtle)' }}
-      >
-        <div className="relative flex items-center" style={{ minWidth: 220 }}>
-          <Search size={13} style={{ position: 'absolute', left: 8, color: '#64748b' }} />
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 12,
+        padding: '10px 16px', borderBottom: '1px solid #1e2d45',
+        flexShrink: 0,
+      }}>
+        <div style={{ position: 'relative', flex: 1, maxWidth: 300 }}>
+          <Search size={13} color="#64748b" style={{ position: 'absolute', left: 8, top: 8 }} />
           <input
             type="text"
-            placeholder="Search machines..."
             value={search}
-            onChange={(e) => { setSearch(e.target.value); setPage(0); }}
-            className="w-full pl-8 pr-3 py-1.5 text-xs"
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search machines..."
             style={{
-              background: '#060b14', border: '1px solid var(--border-subtle)',
-              color: 'var(--text-primary)', borderRadius: 3, outline: 'none',
+              width: '100%', background: '#060b14', border: '1px solid #1e2d45',
+              color: '#e2e8f0', padding: '6px 10px 6px 28px', borderRadius: 4,
+              fontSize: 12, outline: 'none',
             }}
           />
         </div>
-        <div className="flex items-center gap-1">
-          {STATUS_TABS.map((tab) => (
+        <div style={{ display: 'flex', gap: 4 }}>
+          {statusTabs.map((tab) => (
             <button
-              key={tab.key}
-              onClick={() => { setStatusFilter(tab.key); setPage(0); }}
-              className="px-3 py-1.5 text-xs font-medium transition-all"
+              key={tab.id}
+              onClick={() => setStatusFilter(tab.id)}
               style={{
-                background: statusFilter === tab.key ? '#1a2540' : 'transparent',
-                border: `1px solid ${statusFilter === tab.key ? '#3b82f6' : 'var(--border-subtle)'}`,
-                color: statusFilter === tab.key ? 'var(--accent-blue)' : '#64748b',
-                borderRadius: 3,
-                cursor: 'pointer',
+                padding: '5px 12px', borderRadius: 4, cursor: 'pointer',
+                fontSize: 11, fontWeight: 600,
+                background: statusFilter === tab.id ? '#3b82f615' : 'transparent',
+                border: '1px solid',
+                borderColor: statusFilter === tab.id ? '#3b82f6' : '#1e2d45',
+                color: statusFilter === tab.id ? '#60a5fa' : '#94a3b8',
               }}
             >
-              {tab.label}
+              {tab.label} ({tab.count})
             </button>
           ))}
         </div>
       </div>
 
       {/* Machine grid */}
-      <div className="flex-1 overflow-y-auto p-4">
-        {pageItems.length === 0 ? (
-          <div className="flex items-center justify-center h-full text-slate-500 text-sm">
-            No machines found. Click "Add Machine" to create one.
+      <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
+        {filtered.length === 0 ? (
+          <div style={{ textAlign: 'center', color: '#64748b', fontSize: 13, padding: 40 }}>
+            No machines found. Click "Add Machine" to get started.
           </div>
         ) : (
-          <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))' }}>
-            {pageItems.map((m) => {
-              const machineSensors = sensorsByMachine[m.id] ?? [];
-              const isExpanded = expanded.has(m.id);
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+            gap: 12,
+          }}>
+            {pageData.map((machine) => {
+              const mSensors = machineSensors(machine.id);
+              const isExpanded = expandedId === machine.id;
+              const statusColor = STATUS_COLORS[machine.status];
               return (
-                <div key={m.id} className="panel" style={{ borderRadius: 4 }}>
+                <div
+                  key={machine.id}
+                  className="panel"
+                  style={{ borderRadius: 6, overflow: 'hidden' }}
+                >
                   {/* Card header */}
-                  <div
-                    className="flex items-start justify-between px-3 py-2.5"
-                    style={{ borderBottom: isExpanded ? '1px solid var(--border-subtle)' : 'none' }}
-                  >
-                    <div className="flex items-start gap-2.5 flex-1 min-w-0">
-                      {statusDot(m.status)}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-semibold text-slate-200 truncate">{m.name}</span>
-                          <span
-                            className="text-xs px-1.5 py-0.5 uppercase tracking-wide"
-                            style={{
-                              background: `${STATUS_COLORS[m.status]}15`,
-                              color: STATUS_COLORS[m.status],
-                              borderRadius: 2,
-                              fontSize: 9,
-                              fontWeight: 600,
-                            }}
-                          >
-                            {m.status}
-                          </span>
-                        </div>
-                        {m.location && (
-                          <div className="flex items-center gap-1 mt-0.5 text-xs text-slate-500">
-                            <MapPin size={10} /> {m.location}
-                          </div>
-                        )}
-                        {m.description && (
-                          <div className="text-xs text-slate-500 mt-1 truncate">{m.description}</div>
-                        )}
-                      </div>
+                  <div style={{
+                    padding: '10px 12px', borderBottom: '1px solid #1e2d45',
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{
+                        width: 8, height: 8, borderRadius: '50%',
+                        background: statusColor,
+                        boxShadow: `0 0 6px ${statusColor}`,
+                      }} />
+                      <span style={{ fontSize: 12, fontWeight: 700, color: '#e2e8f0' }}>
+                        {machine.name}
+                      </span>
                     </div>
+                    <span style={{
+                      fontSize: 9, fontWeight: 700, color: statusColor,
+                      textTransform: 'uppercase', letterSpacing: '0.5px',
+                    }}>
+                      {machine.status}
+                    </span>
                   </div>
 
-                  {/* Threshold grid */}
-                  <div className="grid grid-cols-3 gap-px px-3 py-2" style={{ background: '#0a1020' }}>
-                    <ThresholdItem icon={<Waves size={11} />} label="Vibration" min={m.rms_min} max={m.rms_max} unit="g" color="#22d3ee" />
-                    <ThresholdItem icon={<Thermometer size={11} />} label="Temp" min={m.temp_min} max={m.temp_max} unit="°C" color="#fb923c" />
-                    <ThresholdItem icon={<Zap size={11} />} label="Current" min={m.current_min} max={m.current_max} unit="A" color="#60a5fa" />
-                  </div>
-
-                  {/* Expandable sensor section */}
-                  {isExpanded && (
-                    <div style={{ background: '#080d14' }}>
-                      {/* Sensor count + add button */}
-                      <div className="flex items-center justify-between px-3 py-2" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                        <span className="text-xs text-slate-400 font-medium">
-                          Sensors ({machineSensors.length})
-                        </span>
-                        <button
-                          onClick={() => openSensorForm(m.id)}
-                          className="flex items-center gap-1 text-xs px-2 py-1"
-                          style={{ background: '#0e1726', border: '1px solid var(--border-subtle)', color: 'var(--accent-cyan)', borderRadius: 3, cursor: 'pointer' }}
-                        >
-                          <Plus size={11} /> Add Sensor
-                        </button>
-                      </div>
-
-                      {/* Inline add-sensor form */}
-                      {sensorFormMachine === m.id && (
-                        <div className="px-3 py-2.5" style={{ background: '#0a1020', borderBottom: '1px solid var(--border-subtle)' }}>
-                          <div className="grid grid-cols-2 gap-2 mb-2">
-                            <input
-                              type="text"
-                              placeholder="Sensor name"
-                              value={sensorForm.name}
-                              onChange={(e) => setSensorForm((p) => ({ ...p, name: e.target.value }))}
-                              className="px-2 py-1 text-xs"
-                              style={{ background: '#060b14', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', borderRadius: 3, outline: 'none' }}
-                            />
-                            <select
-                              value={sensorForm.type}
-                              onChange={(e) => setSensorForm((p) => ({ ...p, type: e.target.value as Sensor['type'] }))}
-                              className="px-2 py-1 text-xs"
-                              style={{ background: '#060b14', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', borderRadius: 3, outline: 'none' }}
-                            >
-                              {SENSOR_TYPES.map((t) => (
-                                <option key={t} value={t}>{t}</option>
-                              ))}
-                            </select>
-                          </div>
-                          <div className="grid grid-cols-2 gap-2 mb-2">
-                            <input
-                              type="text"
-                              placeholder="Channel (e.g. CH1)"
-                              value={sensorForm.channel}
-                              onChange={(e) => setSensorForm((p) => ({ ...p, channel: e.target.value }))}
-                              className="px-2 py-1 text-xs"
-                              style={{ background: '#060b14', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', borderRadius: 3, outline: 'none' }}
-                            />
-                            <input
-                              type="number"
-                              placeholder="Sampling rate (Hz)"
-                              value={sensorForm.samplingRate}
-                              onChange={(e) => setSensorForm((p) => ({ ...p, samplingRate: e.target.value }))}
-                              className="px-2 py-1 text-xs"
-                              style={{ background: '#060b14', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', borderRadius: 3, outline: 'none' }}
-                            />
-                          </div>
-                          <div className="flex items-center justify-end gap-2">
-                            <button
-                              onClick={() => setSensorFormMachine(null)}
-                              className="flex items-center gap-1 text-xs px-2.5 py-1"
-                              style={{ background: '#1a2540', border: '1px solid var(--border-subtle)', color: '#94a3b8', borderRadius: 3, cursor: 'pointer' }}
-                            >
-                              <X size={11} /> Cancel
-                            </button>
-                            <button
-                              onClick={() => handleAddSensor(m.id)}
-                              disabled={sensorSaving}
-                              className="flex items-center gap-1 text-xs px-2.5 py-1"
-                              style={{ background: 'linear-gradient(180deg,#1a4a1a 0%,#0f2e0f 100%)', border: '1px solid #22c55e', color: '#22c55e', borderRadius: 3, cursor: 'pointer', opacity: sensorSaving ? 0.5 : 1 }}
-                            >
-                              {sensorSaving ? <span className="animate-spin" style={{ display: 'inline-block', width: 11, height: 11, border: '1.5px solid #22c55e', borderTopColor: 'transparent', borderRadius: '50%' }} /> : <Plus size={11} />}
-                              Save
-                            </button>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Sensor list */}
-                      {machineSensors.length === 0 ? (
-                        <div className="px-3 py-4 text-center text-xs text-slate-600">
-                          No sensors configured for this machine.
-                        </div>
-                      ) : (
-                        <div>
-                          {machineSensors.map((s) => (
-                            <div
-                              key={s.id}
-                              className="flex items-center gap-2 px-3 py-2"
-                              style={{ borderBottom: '1px solid #0d1525' }}
-                            >
-                              <span style={{ color: s.status === 'active' ? '#22c55e' : '#64748b' }}>
-                                {sensorTypeIcon(s.type)}
-                              </span>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-xs font-medium text-slate-200 truncate">{s.name}</span>
-                                  <span
-                                    className="text-xs uppercase"
-                                    style={{ fontSize: 8, padding: '1px 4px', borderRadius: 2, background: s.status === 'active' ? '#22c55e15' : '#64748b15', color: s.status === 'active' ? '#22c55e' : '#64748b' }}
-                                  >
-                                    {s.status}
-                                  </span>
-                                </div>
-                                <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
-                                  <span>{s.type}</span>
-                                  <span>•</span>
-                                  <span>{s.channel}</span>
-                                  <span>•</span>
-                                  <span>{s.unit}</span>
-                                  <span>•</span>
-                                  <span>{s.sampling_rate} Hz</span>
-                                </div>
-                              </div>
-                              <button
-                                onClick={() => handleToggleSensor(s)}
-                                disabled={sensorToggling === s.id}
-                                title={s.status === 'active' ? 'Deactivate' : 'Activate'}
-                                className="toolbar-icon-btn"
-                                style={{ width: 24, height: 22 }}
-                              >
-                                {sensorToggling === s.id ? (
-                                  <span className="animate-spin" style={{ display: 'inline-block', width: 10, height: 10, border: '1.5px solid #64748b', borderTopColor: 'transparent', borderRadius: '50%' }} />
-                                ) : (
-                                  <Battery size={11} />
-                                )}
-                              </button>
-                              <button
-                                onClick={() => handleDeleteSensor(s)}
-                                disabled={sensorDeleting === s.id}
-                                title="Delete sensor"
-                                className="toolbar-icon-btn"
-                                style={{ width: 24, height: 22, color: '#f87171' }}
-                              >
-                                {sensorDeleting === s.id ? (
-                                  <span className="animate-spin" style={{ display: 'inline-block', width: 10, height: 10, border: '1.5px solid #f87171', borderTopColor: 'transparent', borderRadius: '50%' }} />
-                                ) : (
-                                  <Trash2 size={11} />
-                                )}
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
+                  {/* Card body */}
+                  <div style={{ padding: '10px 12px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: '#64748b', marginBottom: 8 }}>
+                      <MapPin size={11} />
+                      {machine.location || 'No location set'}
                     </div>
-                  )}
+                    {machine.description && (
+                      <div style={{ fontSize: 10.5, color: '#94a3b8', marginBottom: 8, lineHeight: 1.3 }}>
+                        {machine.description}
+                      </div>
+                    )}
 
-                  {/* Action buttons */}
-                  <div className="flex items-center gap-1.5 px-3 py-2" style={{ borderTop: '1px solid var(--border-subtle)' }}>
+                    {/* Thresholds */}
+                    <div style={{
+                      display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6,
+                      marginBottom: 8,
+                    }}>
+                      <Threshold icon={Activity} color="#3b82f6" label="RMS" min={machine.rms_min} max={machine.rms_max} />
+                      <Threshold icon={Thermometer} color="#f97316" label="Temp" min={machine.temp_min} max={machine.temp_max} unit="°" />
+                      <Threshold icon={Zap} color="#eab308" label="Curr" min={machine.current_min} max={machine.current_max} />
+                    </div>
+
+                    {/* Sensor count + expand */}
                     <button
-                      onClick={() => handleMonitor(m)}
-                      className="btn-monitor flex items-center gap-1"
-                      style={{ fontSize: 11, padding: '4px 10px' }}
+                      onClick={() => setExpandedId(isExpanded ? null : machine.id)}
+                      style={{
+                        width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        padding: '6px 8px', background: '#060b14', border: '1px solid #1e2d45',
+                        borderRadius: 4, cursor: 'pointer', color: '#94a3b8', fontSize: 10,
+                      }}
                     >
-                      <Activity size={12} /> Monitor
-                    </button>
-                    <button
-                      onClick={() => setLimitsMachine(m)}
-                      className="btn-secondary flex items-center gap-1"
-                      style={{ fontSize: 11, padding: '4px 10px' }}
-                    >
-                      <Settings2 size={12} /> Limits
-                    </button>
-                    <button
-                      onClick={() => toggleExpand(m.id)}
-                      className="btn-secondary flex items-center gap-1"
-                      style={{ fontSize: 11, padding: '4px 10px' }}
-                    >
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <Gauge size={11} />
+                        Sensors ({mSensors.length})
+                      </span>
                       {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-                      {isExpanded ? 'Collapse' : 'Sensors'}
                     </button>
-                    <div className="flex-1" />
-                    <button
-                      onClick={() => handleDeleteMachine(m)}
-                      disabled={deleting === m.id}
-                      title="Delete machine"
-                      className="toolbar-icon-btn"
-                      style={{ color: '#f87171' }}
-                    >
-                      {deleting === m.id ? (
-                        <span className="animate-spin" style={{ display: 'inline-block', width: 10, height: 10, border: '1.5px solid #f87171', borderTopColor: 'transparent', borderRadius: '50%' }} />
-                      ) : (
+
+                    {/* Expanded sensor list */}
+                    {isExpanded && (
+                      <div style={{ marginTop: 8, background: '#060b14', borderRadius: 4, border: '1px solid #1e2d45' }}>
+                        {mSensors.length === 0 ? (
+                          <div style={{ padding: '8px 10px', fontSize: 10, color: '#64748b' }}>
+                            No sensors assigned to this machine
+                          </div>
+                        ) : (
+                          mSensors.map((s: Sensor) => (
+                            <div key={s.id} style={{
+                              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                              padding: '6px 10px', borderBottom: '1px solid #111827', fontSize: 10,
+                            }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <div style={{
+                                  width: 5, height: 5, borderRadius: '50%',
+                                  background: s.status === 'active' ? '#22c55e' : '#64748b',
+                                }} />
+                                <span style={{ color: '#cbd5e1' }}>{s.name}</span>
+                              </div>
+                              <div style={{ display: 'flex', gap: 8, color: '#64748b' }}>
+                                <span>{s.type}</span>
+                                <span>{s.unit}</span>
+                                <span>{s.sampling_rate}Hz</span>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+
+                    {/* Action buttons */}
+                    <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+                      <button
+                        className="btn-monitor"
+                        onClick={() => handleMonitor(machine)}
+                        style={{ flex: 1, fontSize: 11, padding: '5px 8px' }}
+                      >
+                        Monitor
+                      </button>
+                      <button
+                        className="btn-secondary"
+                        onClick={() => setLimitsMachine(machine)}
+                        style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, padding: '5px 8px' }}
+                      >
+                        <SlidersHorizontal size={11} />
+                        Limits
+                      </button>
+                      <button
+                        onClick={() => handleDelete(machine)}
+                        disabled={deleting === machine.id}
+                        style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          padding: '5px 8px', background: '#ef444410',
+                          border: '1px solid #ef444440', borderRadius: 4,
+                          cursor: 'pointer', color: '#ef4444',
+                          opacity: deleting === machine.id ? 0.5 : 1,
+                        }}
+                      >
                         <Trash2 size={12} />
-                      )}
-                    </button>
+                      </button>
+                    </div>
                   </div>
                 </div>
               );
@@ -541,36 +303,19 @@ export function MachinesPage() {
         )}
       </div>
 
-      {/* Pagination footer */}
-      {filtered.length > 0 && (
-        <div
-          className="flex items-center justify-between px-4 py-2 flex-shrink-0"
-          style={{ background: '#0e1726', borderTop: '1px solid var(--border-subtle)' }}
-        >
-          <span className="text-xs text-slate-500">
-            Showing {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, filtered.length)} of {filtered.length}
-          </span>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => setPage((p) => Math.max(0, p - 1))}
-              disabled={page === 0}
-              className="btn-secondary"
-              style={{ fontSize: 11, padding: '3px 10px', opacity: page === 0 ? 0.4 : 1 }}
-            >
-              Prev
-            </button>
-            <span className="text-xs text-slate-400 px-2">
-              {page + 1} / {totalPages}
-            </span>
-            <button
-              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-              disabled={page >= totalPages - 1}
-              className="btn-secondary"
-              style={{ fontSize: 11, padding: '3px 10px', opacity: page >= totalPages - 1 ? 0.4 : 1 }}
-            >
-              Next
-            </button>
-          </div>
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+          padding: '8px 16px', borderTop: '1px solid #1e2d45',
+        }}>
+          <button className="btn-secondary" onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0} style={{ opacity: page === 0 ? 0.4 : 1, padding: '4px 10px' }}>
+            Prev
+          </button>
+          <span style={{ fontSize: 11, color: '#94a3b8' }}>Page {page + 1} of {totalPages}</span>
+          <button className="btn-secondary" onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1} style={{ opacity: page >= totalPages - 1 ? 0.4 : 1, padding: '4px 10px' }}>
+            Next
+          </button>
         </div>
       )}
 
@@ -578,47 +323,35 @@ export function MachinesPage() {
       {showAdd && (
         <AddMachineModal
           onClose={() => setShowAdd(false)}
-          onCreated={async () => {
-            await refreshMachines();
-            toast('Machine added', 'success');
-          }}
+          onCreated={() => { refreshMachines(); success('Machine added successfully'); }}
         />
       )}
       {limitsMachine && (
         <SetLimitsModal
           machine={limitsMachine}
           onClose={() => setLimitsMachine(null)}
-          onSaved={async () => {
-            await refreshMachines();
-            toast('Limits updated', 'success');
-          }}
+          onSaved={() => { refreshMachines(); success('Limits saved successfully'); }}
         />
       )}
     </div>
   );
 }
 
-/* ---------- threshold item sub-component ---------- */
-
-function ThresholdItem({
-  icon, label, min, max, unit, color,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  min: number;
-  max: number;
-  unit: string;
-  color: string;
+function Threshold({ icon: Icon, color, label, min, max, unit }: {
+  icon: typeof Activity; color: string; label: string; min: number; max: number; unit?: string;
 }) {
   return (
-    <div className="flex flex-col items-center py-1" style={{ background: '#0e1726', margin: 1, borderRadius: 2 }}>
-      <div className="flex items-center gap-1 mb-0.5" style={{ color }}>
-        {icon}
-        <span style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.3px' }}>{label}</span>
+    <div style={{
+      padding: '4px 6px', background: '#060b14', borderRadius: 3,
+      border: '1px solid #1e2d45', textAlign: 'center',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3, marginBottom: 2 }}>
+        <Icon size={9} color={color} />
+        <span style={{ fontSize: 8, color: '#64748b', fontWeight: 600 }}>{label}</span>
       </div>
-      <span className="text-xs font-mono" style={{ color: '#94a3b8' }}>
-        {min}–{max} {unit}
-      </span>
+      <div style={{ fontSize: 9, color }}>
+        {min}–{max}{unit ?? ''}
+      </div>
     </div>
   );
 }

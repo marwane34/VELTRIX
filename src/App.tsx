@@ -10,15 +10,15 @@ import MachinesPage from './pages/MachinesPage';
 import AlertsPage from './pages/AlertsPage';
 import AnalyticsPage from './pages/AnalyticsPage';
 import CommunicationPage from './pages/CommunicationPage';
-import { AppLayout } from './components/AppLayout';
+import { AppLayout, NavItem } from './components/AppLayout';
 
 type AuthPage = 'login' | 'register';
-type AppPage = 'dashboard' | 'machines' | 'alerts' | 'analytics' | 'communication';
 
 function AppContent() {
   const { user, loading } = useAuth();
   const [authPage, setAuthPage] = useState<AuthPage>('login');
-  const [appPage, setAppPage] = useState<AppPage>('dashboard');
+  const [appPage, setAppPage] = useState<NavItem>('dashboard');
+  const [showNotifications, setShowNotifications] = useState(false);
 
   if (loading) {
     return (
@@ -41,9 +41,9 @@ function AppContent() {
       <CommunicationProvider>
         <ToastProvider>
           {appPage === 'dashboard' ? (
-            <Dashboard onNavigate={(p) => setAppPage(p as AppPage)} />
+            <Dashboard onNavigate={(p) => setAppPage(p as NavItem)} />
           ) : (
-            <AppLayout currentPage={appPage} onNavigate={setAppPage}>
+            <AppLayout activeNav={appPage} onNavigate={setAppPage} onOpenNotifications={() => setShowNotifications(true)}>
               {appPage === 'machines' && <MachinesPage />}
               {appPage === 'alerts' && <AlertsPage />}
               {appPage === 'analytics' && <AnalyticsPage />}

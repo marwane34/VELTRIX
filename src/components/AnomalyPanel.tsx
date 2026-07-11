@@ -1,207 +1,214 @@
-import { Activity, TriangleAlert as AlertTriangle, ShieldCheck, Wrench, Thermometer, Zap, Clock, Lightbulb } from 'lucide-react';
+import { useMemo } from 'react';
+import { Activity, TriangleAlert as AlertTriangle, OctagonAlert as AlertOctagon, CircleCheck as CheckCircle, Wrench, Clock } from 'lucide-react';
 import { useMonitoring } from '../contexts/MonitoringContext';
-
-const COLORS = {
-  bg: '#080d14',
-  border: '#1e2d45',
-  text: '#94a3b8',
-  grid: '#1a2540',
-  green: '#22c55e',
-  yellow: '#eab308',
-  red: '#ef4444',
-  blue: '#3b82f6',
-  cyan: '#06b6d4',
-  orange: '#f97316',
-};
-
-function healthColor(score: number) {
-  if (score > 70) return COLORS.green;
-  if (score >= 40) return COLORS.yellow;
-  return COLORS.red;
-}
-
-function statusBadge(status: string) {
-  const map: Record<string, { color: string; label: string }> = {
-    healthy: { color: COLORS.green, label: 'HEALTHY' },
-    warning: { color: COLORS.yellow, label: 'WARNING' },
-    critical: { color: COLORS.red, label: 'CRITICAL' },
-  };
-  const s = map[status] ?? map.healthy;
-  return (
-    <span
-      className="px-2 py-0.5 text-[10px] font-bold tracking-wider"
-      style={{ color: s.color, border: `1px solid ${s.color}`, background: `${s.color}15` }}
-    >
-      {s.label}
-    </span>
-  );
-}
-
-function MetricBar({ icon: Icon, label, value, color }: { icon: typeof Wrench; label: string; value: number; color: string }) {
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-1">
-        <span className="flex items-center gap-1.5 text-[10px]" style={{ color: COLORS.text }}>
-          <Icon size={11} />
-          {label}
-        </span>
-        <span className="text-[11px] font-bold" style={{ color }}>
-          {value}%
-        </span>
-      </div>
-      <div style={{ height: 4, background: COLORS.grid, borderRadius: 2, overflow: 'hidden' }}>
-        <div
-          style={{
-            width: `${Math.min(100, Math.max(0, value))}%`,
-            height: '100%',
-            background: color,
-            transition: 'width 0.3s ease',
-          }}
-        />
-      </div>
-    </div>
-  );
-}
 
 export default function AnomalyPanel() {
   const { aiAnalysis } = useMonitoring();
 
-  if (!aiAnalysis) {
-    return (
-      <div className="panel" style={{ background: COLORS.bg, padding: 12 }}>
-        <span className="text-[10px] font-semibold tracking-wider" style={{ color: COLORS.text }}>
-          AI ANOMALY DETECTION
-        </span>
-        <div className="flex items-center justify-center py-8 text-[11px]" style={{ color: COLORS.text }}>
-          No data available
-        </div>
-      </div>
-    );
-  }
+  const gaugeColor = useMemo(() => {
+    if (!aiAnalysis) return '#64748b';
+    if (aiAnalysis.healthScore > 70) return '#22c55e';
+    if (aiAnalysis.healthScore >= 40) return '#eab308';
+    return '#ef4444';
+  }, [aiAnalysis]);
 
-  const {
-    healthScore,
-    status,
-    bearingWear,
-    overheatRisk,
-    failureRisk,
-    rulHours,
-    anomalies,
-    recommendation,
-  } = aiAnalysis;
+  const statusBadge = useMemo(() => {
+    if (!aiAnalysis) return { text: 'NO DATA', color: '#64748b', icon: Activity };
+    switch (aiAnalysis.status) {
+      case 'healthy':
+        return { text: 'HEALTHY', color: '#22c55e', icon: CheckCircle };
+      case 'warning':
+        return { text: 'WARNING', color: '#eab308', icon: AlertTriangle };
+      case 'critical':
+        return { text: 'CRITICAL', color: '#ef4444', icon: AlertOctagon };
+      default:
+        return { text: 'UNKNOWN', color: '#64748b', icon: Activity };
+    }
+  }, [aiAnalysis]);
 
-  const hc = healthColor(healthScore);
+  // Gauge arc calculation
+  const gaugeAngle = aiAnalysis ? (aiAnalysis.healthScore / 100) * 180 : 0;
+  const gaugeRadius = 50;
+  const cx = 70;
+  const cy = 55;
+
+  const polarToCartesian = (centerX: number, centerY: number, r: number, angleDeg: number) => {
+    const rad = (angleDeg - 180) * (Math.PI / 180);
+    return { x: centerX + r * Math.cos(rad), y: centerY + r * Math.sin(rad) };
+  };
+
+  const arcPath = useMemo(() => {
+    const start = polarToCartesian(cx, cy, gaugeRadius, 0);
+    const end = polarToCartesian(cx, cy, gaugeRadius, gaugeAngle);
+    const largeArc = gaugeAngle > 180 ? 1 : 0;
+    return `M ${start.x} ${start.y} A ${gaugeRadius} ${gaugeRadius} 0 ${largeArc} 1 ${end.x} ${end.y}`;
+  }, [gaugeAngle]);
+
+  const bgArcPath = useMemo(() => {
+    const start = polarToCartesian(cx, cy, gaugeRadius, 0);
+    const end = polarToCartesian(cx, cy, gaugeRadius, 180);
+    return `M ${start.x} ${start.y} A ${gaugeRadius} ${gaugeRadius} 0 1 1 ${end.x} ${end.y}`;
+  }, []);
+
+  const StatusIcon = statusBadge.icon;
 
   return (
-    <div className="panel" style={{ background: COLORS.bg, padding: 0 }}>
+    <div className="panel" style={{ borderRadius: 4, overflow: 'hidden', height: '100%' }}>
       {/* Header */}
-      <div
-        className="flex items-center justify-between px-3 py-1.5"
-        style={{ borderBottom: `1px solid ${COLORS.border}` }}
-      >
-        <span className="flex items-center gap-1.5 text-[10px] font-semibold tracking-wider" style={{ color: COLORS.text }}>
-          <Activity size={11} style={{ color: COLORS.cyan }} />
-          AI ANOMALY DETECTION
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8,
+        padding: '6px 12px', borderBottom: '1px solid #1e2d45',
+        background: 'linear-gradient(180deg, #111827 0%, #0d1220 100%)',
+      }}>
+        <Activity size={14} color="#06b6d4" />
+        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '1px', color: '#94a3b8' }}>
+          AI HEALTH ANALYSIS
         </span>
-        {statusBadge(status)}
       </div>
 
-      <div className="p-3 space-y-3">
-        {/* Health Score */}
-        <div className="flex items-center gap-3">
-          <div
-            className="flex items-center justify-center"
-            style={{
-              width: 56,
-              height: 56,
-              border: `2px solid ${hc}`,
-              borderRadius: '50%',
-              background: `${hc}10`,
-              boxShadow: `0 0 12px ${hc}40`,
-            }}
-          >
-            <span className="text-xl font-bold" style={{ color: hc }}>
-              {healthScore}
+      {!aiAnalysis ? (
+        <div style={{ padding: 40, textAlign: 'center', color: '#64748b', fontSize: 12 }}>
+          No machine selected
+        </div>
+      ) : (
+        <div style={{ padding: '12px' }}>
+          {/* Health Score Gauge */}
+          <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+            <svg width={140} height={70} viewBox="0 0 140 70">
+              {/* Background arc */}
+              <path d={bgArcPath} fill="none" stroke="#1a2540" strokeWidth={8} strokeLinecap="round" />
+              {/* Value arc */}
+              <path d={arcPath} fill="none" stroke={gaugeColor} strokeWidth={8} strokeLinecap="round" />
+              {/* Score text */}
+              <text x={cx} y={cy + 2} textAnchor="middle" fontSize={22} fontWeight={700} fill={gaugeColor}>
+                {aiAnalysis.healthScore}
+              </text>
+              <text x={cx} y={cy + 16} textAnchor="middle" fontSize={8} fill="#64748b">
+                HEALTH SCORE
+              </text>
+            </svg>
+
+            {/* Status Badge */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '4px 10px', borderRadius: 4,
+                background: `${statusBadge.color}15`,
+                border: `1px solid ${statusBadge.color}`,
+                color: statusBadge.color,
+                fontSize: 11, fontWeight: 700, letterSpacing: '0.5px',
+              }}>
+                <StatusIcon size={12} />
+                {statusBadge.text}
+              </div>
+              <div style={{ fontSize: 9, color: '#64748b' }}>
+                System Status
+              </div>
+            </div>
+          </div>
+
+          {/* Risk Metrics */}
+          <div style={{
+            display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8,
+            marginTop: 14,
+          }}>
+            <RiskCard label="Bearing Wear" value={aiAnalysis.bearingWear} unit="%" color="#f97316" />
+            <RiskCard label="Overheat Risk" value={aiAnalysis.overheatRisk} unit="%" color="#ef4444" />
+            <RiskCard label="Failure Risk" value={aiAnalysis.failureRisk} unit="%" color="#dc2626" />
+          </div>
+
+          {/* RUL */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            marginTop: 12, padding: '8px 10px',
+            background: '#080d14', borderRadius: 4,
+            border: '1px solid #1e2d45',
+          }}>
+            <Clock size={14} color="#3b82f6" />
+            <span style={{ fontSize: 10, color: '#94a3b8' }}>Remaining Useful Life:</span>
+            <span style={{ fontSize: 14, fontWeight: 700, color: '#60a5fa' }}>
+              {aiAnalysis.rulHours.toLocaleString()} h
             </span>
           </div>
-          <div className="flex-1">
-            <div className="text-[9px] tracking-wider" style={{ color: COLORS.text }}>
-              HEALTH SCORE
-            </div>
-            <div className="text-[10px]" style={{ color: hc }}>
-              {status === 'healthy' ? 'Optimal condition' : status === 'warning' ? 'Attention required' : 'Critical state'}
-            </div>
-            <div className="flex items-center gap-1 mt-1 text-[9px]" style={{ color: COLORS.text }}>
-              <ShieldCheck size={10} style={{ color: hc }} />
-              {healthScore > 70 ? 'No anomalies detected' : `${anomalies.length} anomaly(ies) detected`}
-            </div>
-          </div>
-        </div>
 
-        {/* Metrics */}
-        <div className="space-y-2">
-          <MetricBar icon={Wrench} label="Bearing Wear" value={bearingWear} color={COLORS.orange} />
-          <MetricBar icon={Thermometer} label="Overheat Risk" value={overheatRisk} color={COLORS.red} />
-          <MetricBar icon={Zap} label="Failure Risk" value={failureRisk} color={COLORS.red} />
-        </div>
-
-        {/* RUL */}
-        <div
-          className="flex items-center justify-between px-2 py-1.5"
-          style={{ background: COLORS.grid, border: `1px solid ${COLORS.border}` }}
-        >
-          <span className="flex items-center gap-1.5 text-[10px]" style={{ color: COLORS.text }}>
-            <Clock size={11} style={{ color: COLORS.cyan }} />
-            Remaining Useful Life
-          </span>
-          <span className="text-[12px] font-bold" style={{ color: COLORS.cyan }}>
-            {rulHours.toLocaleString()} h
-          </span>
-        </div>
-
-        {/* Anomalies */}
-        <div>
-          <div className="flex items-center gap-1.5 text-[10px] font-semibold mb-1.5" style={{ color: COLORS.text }}>
-            <AlertTriangle size={11} style={{ color: COLORS.yellow }} />
-            ANOMALIES
-          </div>
-          {anomalies.length === 0 ? (
-            <div className="text-[10px] px-2 py-1.5" style={{ color: COLORS.green, background: `${COLORS.green}10` }}>
-              No anomalies detected
+          {/* Anomalies List */}
+          <div style={{ marginTop: 12 }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              fontSize: 10, fontWeight: 600, color: '#94a3b8',
+              marginBottom: 6, letterSpacing: '0.5px',
+            }}>
+              <AlertTriangle size={12} color="#eab308" />
+              DETECTED ANOMALIES
             </div>
-          ) : (
-            <div style={{ maxHeight: 100, overflowY: 'auto' }}>
-              {anomalies.map((a, i) => (
-                <div
-                  key={i}
-                  className="anomaly-log-item flex items-start gap-1.5"
-                  style={{ color: COLORS.text }}
-                >
-                  <span style={{ color: COLORS.yellow }}>•</span>
-                  <span>{a}</span>
+            <div style={{
+              background: '#080d14', borderRadius: 4,
+              border: '1px solid #1e2d45', maxHeight: 100, overflowY: 'auto',
+            }}>
+              {aiAnalysis.anomalies.length === 0 ? (
+                <div style={{ padding: '8px 10px', fontSize: 10, color: '#22c55e', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <CheckCircle size={12} />
+                  No anomalies detected
                 </div>
-              ))}
+              ) : (
+                aiAnalysis.anomalies.map((anomaly, i) => (
+                  <div key={i} className="anomaly-log-item" style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+                    <span style={{ color: '#eab308', fontSize: 10 }}>⚠</span>
+                    <span style={{ color: '#cbd5e1', fontSize: 10.5, lineHeight: 1.3 }}>{anomaly}</span>
+                  </div>
+                ))
+              )}
             </div>
-          )}
-        </div>
+          </div>
 
-        {/* Recommendation */}
-        <div>
-          <div className="flex items-center gap-1.5 text-[10px] font-semibold mb-1.5" style={{ color: COLORS.text }}>
-            <Lightbulb size={11} style={{ color: COLORS.blue }} />
-            RECOMMENDATION
-          </div>
-          <div
-            className="text-[10px] leading-relaxed px-2 py-1.5"
-            style={{
-              color: COLORS.text,
-              background: `${COLORS.blue}08`,
-              border: `1px solid ${COLORS.border}`,
-            }}
-          >
-            {recommendation}
+          {/* Recommendation */}
+          <div style={{
+            marginTop: 12, padding: '10px',
+            background: `${gaugeColor}08`,
+            border: `1px solid ${gaugeColor}40`,
+            borderRadius: 4,
+          }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              fontSize: 10, fontWeight: 600, color: gaugeColor,
+              marginBottom: 4, letterSpacing: '0.5px',
+            }}>
+              <Wrench size={12} />
+              RECOMMENDATION
+            </div>
+            <div style={{ fontSize: 10.5, color: '#cbd5e1', lineHeight: 1.4 }}>
+              {aiAnalysis.recommendation}
+            </div>
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+function RiskCard({ label, value, unit, color }: { label: string; value: number; unit: string; color: string }) {
+  return (
+    <div style={{
+      padding: '8px',
+      background: '#080d14',
+      borderRadius: 4,
+      border: '1px solid #1e2d45',
+      textAlign: 'center',
+    }}>
+      <div style={{ fontSize: 9, color: '#64748b', marginBottom: 4, letterSpacing: '0.3px' }}>
+        {label.toUpperCase()}
+      </div>
+      <div style={{ fontSize: 16, fontWeight: 700, color }}>
+        {value}{unit}
+      </div>
+      <div style={{
+        marginTop: 4, height: 3, borderRadius: 2,
+        background: '#1a2540', overflow: 'hidden',
+      }}>
+        <div style={{
+          width: `${Math.min(100, value)}%`, height: '100%',
+          background: color, borderRadius: 2,
+        }} />
       </div>
     </div>
   );

@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { X, Loader as Loader2 } from 'lucide-react';
+import { useState, FormEvent } from 'react';
+import { X, Plus } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -8,29 +8,22 @@ interface AddMachineModalProps {
   onCreated: () => void;
 }
 
-const COLORS = {
-  border: '#1e2d45',
-  inputBg: '#060b14',
-  inputText: '#e2e8f0',
-  text: '#94a3b8',
-};
-
 export default function AddMachineModal({ onClose, onCreated }: AddMachineModalProps) {
   const { user } = useAuth();
   const [name, setName] = useState('');
   const [location, setLocation] = useState('');
   const [description, setDescription] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!user) return;
     if (!name.trim()) {
-      setError('Name is required');
+      setError('Machine name is required');
       return;
     }
-    setLoading(true);
+    setSubmitting(true);
     setError(null);
 
     const { error: insertError } = await supabase.from('machines').insert({
@@ -44,105 +37,120 @@ export default function AddMachineModal({ onClose, onCreated }: AddMachineModalP
       temp_min: 0,
       temp_max: 80,
       current_min: 0,
-      current_max: 5,
+      current_max: 5.0,
     });
 
-    setLoading(false);
-
+    setSubmitting(false);
     if (insertError) {
       setError(insertError.message);
       return;
     }
-
     onCreated();
     onClose();
   }
 
   const inputStyle: React.CSSProperties = {
-    background: COLORS.inputBg,
-    border: `1px solid ${COLORS.border}`,
-    color: COLORS.inputText,
+    width: '100%',
+    background: '#060b14',
+    border: '1px solid #1e2d45',
+    color: '#e2e8f0',
+    padding: '8px 10px',
+    borderRadius: 4,
+    fontSize: 13,
+    outline: 'none',
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.7)' }}>
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0,
+        background: 'rgba(0,0,0,0.7)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        zIndex: 1000,
+      }}
+    >
       <div
-        className="w-full max-w-md"
-        style={{ background: '#0e1726', border: `1px solid ${COLORS.border}`, boxShadow: '0 0 40px rgba(0,0,0,0.8)' }}
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: '#0e1726',
+          border: '1px solid #1e2d45',
+          borderRadius: 8,
+          width: 420,
+          maxWidth: '90vw',
+          boxShadow: '0 8px 40px rgba(0,0,0,0.5)',
+        }}
       >
         {/* Header */}
-        <div
-          className="flex items-center justify-between px-4 py-3"
-          style={{
-            borderBottom: `1px solid ${COLORS.border}`,
-            background: 'linear-gradient(180deg,#151f33 0%,#0f1726 100%)',
-          }}
-        >
-          <span className="text-xs font-semibold text-slate-200 tracking-wide">ADD NEW MACHINE</span>
-          <button onClick={onClose}>
-            <X size={14} className="text-slate-500 hover:text-slate-300" />
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '12px 16px', borderBottom: '1px solid #1e2d45',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Plus size={16} color="#3b82f6" />
+            <span style={{ fontSize: 13, fontWeight: 700, color: '#e2e8f0', letterSpacing: '0.5px' }}>
+              ADD MACHINE
+            </span>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b' }}>
+            <X size={18} />
           </button>
         </div>
 
         {/* Form */}
-        <form onSubmit={handleSubmit} className="p-4 space-y-3">
+        <form onSubmit={handleSubmit} style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div>
-            <label className="block text-[10px] mb-1 tracking-wider" style={{ color: COLORS.text }}>
-              NAME *
+            <label style={{ fontSize: 11, color: '#94a3b8', marginBottom: 4, display: 'block', fontWeight: 600 }}>
+              Machine Name *
             </label>
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Pump Station A"
-              className="w-full px-3 py-2 text-xs outline-none focus:border-blue-500"
+              placeholder="e.g. Pump Station A1"
               style={inputStyle}
               autoFocus
             />
           </div>
 
           <div>
-            <label className="block text-[10px] mb-1 tracking-wider" style={{ color: COLORS.text }}>
-              LOCATION
+            <label style={{ fontSize: 11, color: '#94a3b8', marginBottom: 4, display: 'block', fontWeight: 600 }}>
+              Location
             </label>
             <input
               type="text"
               value={location}
               onChange={(e) => setLocation(e.target.value)}
-              placeholder="e.g. Building 3 - Floor 2"
-              className="w-full px-3 py-2 text-xs outline-none focus:border-blue-500"
+              placeholder="e.g. Building B, Floor 2"
               style={inputStyle}
             />
           </div>
 
           <div>
-            <label className="block text-[10px] mb-1 tracking-wider" style={{ color: COLORS.text }}>
-              DESCRIPTION
+            <label style={{ fontSize: 11, color: '#94a3b8', marginBottom: 4, display: 'block', fontWeight: 600 }}>
+              Description
             </label>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Brief description of the machine..."
               rows={3}
-              className="w-full px-3 py-2 text-xs outline-none focus:border-blue-500 resize-none"
-              style={inputStyle}
+              style={{ ...inputStyle, resize: 'vertical' }}
             />
           </div>
 
           {error && (
-            <div className="text-[11px] px-3 py-2" style={{ color: '#ef4444', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)' }}>
+            <div style={{ fontSize: 12, color: '#ef4444', padding: '6px 10px', background: '#ef444410', borderRadius: 4, border: '1px solid #ef444440' }}>
               {error}
             </div>
           )}
 
-          {/* Buttons */}
-          <div className="flex justify-end gap-2 pt-2">
-            <button type="button" onClick={onClose} className="btn-secondary">
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
+            <button type="button" className="btn-secondary" onClick={onClose}>
               Cancel
             </button>
-            <button type="submit" disabled={loading} className="btn-monitor flex items-center gap-1.5">
-              {loading && <Loader2 size={12} className="animate-spin" />}
-              {loading ? 'Creating...' : 'Create Machine'}
+            <button type="submit" className="btn-monitor" disabled={submitting} style={{ opacity: submitting ? 0.6 : 1 }}>
+              {submitting ? 'Creating...' : 'Add Machine'}
             </button>
           </div>
         </form>

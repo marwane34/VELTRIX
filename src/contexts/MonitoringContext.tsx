@@ -86,39 +86,31 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
     const { data } = await supabase.from('machines').select('*').eq('user_id', user.id).order('created_at');
     if (data) { setMachines(data as Machine[]); if (data.length > 0 && !selectedMachineId) setSelectedMachineId(data[0].id); }
   }
-
   async function refreshSensors() {
     if (!user) return;
     const { data } = await supabase.from('sensors').select('*').eq('user_id', user.id).order('created_at');
     if (data) setSensors(data as Sensor[]);
   }
-
   async function refreshSettings() {
     if (!user) return;
     const { data } = await supabase.from('settings').select('*').eq('user_id', user.id);
     if (data) setSettings(data as Setting[]);
   }
-
   async function refreshAlerts() {
     if (!user) return;
     const { data } = await supabase.from('alerts').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(50);
     if (data) { setRecentAlerts(data as Alert[]); setUnreadCount((data as Alert[]).filter(a => !a.is_read).length); }
   }
-
   async function markAlertsRead() {
     if (!user) return;
     await supabase.from('alerts').update({ is_read: true }).eq('user_id', user.id).eq('is_read', false);
     setUnreadCount(0);
   }
-
   async function saveSetting(key: string, value: string, category = 'general') {
     if (!user) return;
     const existing = settings.find(s => s.key === key);
-    if (existing) {
-      await supabase.from('settings').update({ value, updated_at: new Date().toISOString() }).eq('id', existing.id);
-    } else {
-      await supabase.from('settings').insert({ user_id: user.id, key, value, category });
-    }
+    if (existing) await supabase.from('settings').update({ value, updated_at: new Date().toISOString() }).eq('id', existing.id);
+    else await supabase.from('settings').insert({ user_id: user.id, key, value, category });
     refreshSettings();
   }
 

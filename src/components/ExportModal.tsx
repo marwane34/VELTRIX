@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { X, Download, Loader as Loader2, FileText, FileJson } from 'lucide-react';
+import { X, Download, FileText, FileJson } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
 import type { Machine, SensorSnapshot } from '../types';
 
 interface ExportModalProps {
@@ -8,170 +9,172 @@ interface ExportModalProps {
   onClose: () => void;
 }
 
-const COLORS = {
-  border: '#1e2d45',
-  text: '#94a3b8',
-};
-
 type ExportFormat = 'csv' | 'json';
 
 export default function ExportModal({ machine, onClose }: ExportModalProps) {
+  const { user } = useAuth();
+  const [format, setFormat] = useState<ExportFormat>('csv');
   const [snapshots, setSnapshots] = useState<SensorSnapshot[]>([]);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [format, setFormat] = useState<ExportFormat>('csv');
 
   useEffect(() => {
-    if (!machine) return;
+    if (!machine || !user) return;
     setLoading(true);
-    setError(null);
     supabase
       .from('sensor_snapshots')
       .select('*')
       .eq('machine_id', machine.id)
       .order('recorded_at', { ascending: false })
       .limit(500)
-      .then(({ data, error: fetchError }) => {
-        setLoading(false);
-        if (fetchError) {
-          setError(fetchError.message);
-          return;
-        }
+      .then(({ data }) => {
         setSnapshots((data as SensorSnapshot[]) ?? []);
+        setLoading(false);
       });
-  }, [machine]);
+  }, [machine, user]);
 
-  function doExport() {
+  function handleExport() {
     if (!machine || snapshots.length === 0) return;
     setExporting(true);
 
-    try {
-      const filename = `${machine.name.replace(/\s+/g, '_')}_export.${format}`;
-      let content: string;
-      let mime: string;
+    let content = '';
+    let filename = '';
+    let mime = '';
 
-      if (format === 'csv') {
-        const headers = [
-          'id', 'machine_id', 'temperature', 'vibration_rms', 'current', 'rpm', 'voltage', 'recorded_at',
-        ];
-        const rows = snapshots.map((s) =>
-          [s.id, s.machine_id, s.temperature, s.vibration_rms, s.current, s.rpm, s.voltage, s.recorded_at].join(','),
-        );
-        content = [headers.join(','), ...rows].join('\n');
-        mime = 'text/csv';
-      } else {
-        content = JSON.stringify(snapshots, null, 2);
-        mime = 'application/json';
-      }
-
-      const blob = new Blob([content], { type: mime });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch {
-      setError('Export failed');
+    if (format === 'csv') {
+      const headers = ['id', 'machine_id', 'temperature', 'vibration_rms', 'current', 'rpm', 'voltage', 'recorded_at'];
+      const rows = snapshots.map((s) =>
+        [s.id, s.machine_id, s.temperature, s.vibration_rms, s.current, s.rpm, s.voltage, s.recorded_at].join(',')
+      );
+      content = [headers.join(','), ...rows].join('\n');
+      filename = `${machine.name.replace(/\s+/g, '_')}_export.csv`;
+      mime = 'text/csv';
+    } else {
+      content = JSON.stringify(snapshots, null, 2);
+      filename = `${machine.name.replace(/\s+/g, '_')}_export.json`;
+      mime = 'application/json';
     }
+
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
 
     setExporting(false);
   }
 
-  if (!machine) return null;
+  const formatButton = (fmt: ExportFormat, label: string, Icon: typeof FileText) => {
+    const active = format === fmt;
+    return (
+      <button
+        key={fmt}
+        type="button"
+        onClick={() => setFormat(fmt)}
+        style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: 6,
+          padding: '14px',
+          background: active ? '#3b82f615' : '#060b14',
+          border: `1px solid ${active ? '#3b82f6' : '#1e2d45'}`,
+          borderRadius: 6,
+          cursor: 'pointer',
+          transition: 'all 0.15s',
+        }}
+      >
+        <Icon size={24} color={active ? '#3b82f6' : '#64748b'} />
+        <span style={{ fontSize: 11, fontWeight: 600, color: active ? '#3b82f6' : '#94a3b8' }}>{label}</span>
+      </button>
+    );
+  };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.7)' }}>
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0,
+        background: 'rgba(0,0,0,0.7)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        zIndex: 1000,
+      }}
+    >
       <div
-        className="w-full max-w-md"
-        style={{ background: '#0e1726', border: `1px solid ${COLORS.border}`, boxShadow: '0 0 40px rgba(0,0,0,0.8)' }}
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: '#0e1726',
+          border: '1px solid #1e2d45',
+          borderRadius: 8,
+          width: 440,
+          maxWidth: '90vw',
+          boxShadow: '0 8px 40px rgba(0,0,0,0.5)',
+        }}
       >
         {/* Header */}
-        <div
-          className="flex items-center justify-between px-4 py-3"
-          style={{
-            borderBottom: `1px solid ${COLORS.border}`,
-            background: 'linear-gradient(180deg,#151f33 0%,#0f1726 100%)',
-          }}
-        >
-          <span className="text-xs font-semibold text-slate-200 tracking-wide">
-            EXPORT DATA — {machine.name}
-          </span>
-          <button onClick={onClose}>
-            <X size={14} className="text-slate-500 hover:text-slate-300" />
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '12px 16px', borderBottom: '1px solid #1e2d45',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Download size={16} color="#3b82f6" />
+            <span style={{ fontSize: 13, fontWeight: 700, color: '#e2e8f0', letterSpacing: '0.5px' }}>
+              EXPORT DATA
+              {machine ? ` — ${machine.name}` : ''}
+            </span>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b' }}>
+            <X size={18} />
           </button>
         </div>
 
-        {/* Content */}
-        <div className="p-4 space-y-4">
-          {loading ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 size={20} className="animate-spin" style={{ color: COLORS.text }} />
-            </div>
-          ) : error ? (
-            <div className="text-[11px] px-3 py-2" style={{ color: '#ef4444', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)' }}>
-              {error}
+        {/* Body */}
+        <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {!machine ? (
+            <div style={{ textAlign: 'center', color: '#64748b', fontSize: 13, padding: 20 }}>
+              No machine selected
             </div>
           ) : (
             <>
-              {/* Summary */}
-              <div className="flex items-center justify-between text-[11px]" style={{ color: COLORS.text }}>
-                <span>Records available</span>
-                <span className="font-bold text-slate-200">{snapshots.length}</span>
+              {/* Data count */}
+              <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '10px 12px', background: '#060b14', borderRadius: 4,
+                border: '1px solid #1e2d45',
+              }}>
+                <span style={{ fontSize: 12, color: '#94a3b8' }}>Available Records</span>
+                <span style={{ fontSize: 14, fontWeight: 700, color: '#60a5fa' }}>
+                  {loading ? '...' : snapshots.length}
+                </span>
               </div>
 
               {/* Format selection */}
               <div>
-                <div className="text-[10px] mb-2 tracking-wider" style={{ color: COLORS.text }}>
-                  EXPORT FORMAT
+                <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 8, fontWeight: 600 }}>
+                  Export Format
                 </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => setFormat('csv')}
-                    className="flex items-center gap-2 px-3 py-2 text-xs transition-all"
-                    style={{
-                      background: format === 'csv' ? 'rgba(59,130,246,0.15)' : '#060b14',
-                      border: `1px solid ${format === 'csv' ? '#3b82f6' : COLORS.border}`,
-                      color: format === 'csv' ? '#60a5fa' : COLORS.text,
-                    }}
-                  >
-                    <FileText size={14} />
-                    CSV
-                  </button>
-                  <button
-                    onClick={() => setFormat('json')}
-                    className="flex items-center gap-2 px-3 py-2 text-xs transition-all"
-                    style={{
-                      background: format === 'json' ? 'rgba(59,130,246,0.15)' : '#060b14',
-                      border: `1px solid ${format === 'json' ? '#3b82f6' : COLORS.border}`,
-                      color: format === 'json' ? '#60a5fa' : COLORS.text,
-                    }}
-                  >
-                    <FileJson size={14} />
-                    JSON
-                  </button>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  {formatButton('csv', 'CSV', FileText)}
+                  {formatButton('json', 'JSON', FileJson)}
                 </div>
               </div>
 
-              {snapshots.length === 0 && (
-                <div className="text-[11px] text-center py-4" style={{ color: COLORS.text }}>
-                  No data available to export
-                </div>
-              )}
-
-              {/* Buttons */}
-              <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={onClose} className="btn-secondary">
+              {/* Export button */}
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button type="button" className="btn-secondary" onClick={onClose}>
                   Cancel
                 </button>
                 <button
-                  onClick={doExport}
-                  disabled={exporting || snapshots.length === 0}
-                  className="btn-monitor flex items-center gap-1.5"
+                  type="button"
+                  className="btn-monitor"
+                  onClick={handleExport}
+                  disabled={exporting || loading || snapshots.length === 0}
+                  style={{ opacity: exporting || loading || snapshots.length === 0 ? 0.6 : 1 }}
                 >
-                  {exporting ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
-                  {exporting ? 'Exporting...' : 'Export'}
+                  {exporting ? 'Exporting...' : `Export ${format.toUpperCase()}`}
                 </button>
               </div>
             </>
