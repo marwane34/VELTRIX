@@ -1,186 +1,413 @@
-import { useEffect, useState } from 'react';
-import { TrendingUp, Activity, Thermometer, Zap, Cpu, Clock } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { TrendingUp, Download, Activity, Thermometer, Zap, Gauge } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useMonitoring } from '../contexts/MonitoringContext';
-import type { Prediction } from '../types';
+import type { MachineHealth } from '../types';
 
-function HealthGauge({ score }: { score: number }) {
-  const color = score >= 70 ? '#22c55e' : score >= 40 ? '#eab308' : '#ef4444';
-  const r = 36;
-  const circ = 2 * Math.PI * r;
-  const arc = (score / 100) * circ;
-  return (
-    <svg width={90} height={90} viewBox="0 0 90 90">
-      <circle cx={45} cy={45} r={r} fill="none" stroke="#1e2d45" strokeWidth={8} />
-      <circle cx={45} cy={45} r={r} fill="none" stroke={color} strokeWidth={8}
-        strokeDasharray={`${arc} ${circ - arc}`} strokeDashoffset={circ / 4}
-        strokeLinecap="round" style={{ transition: 'stroke-dasharray 0.5s' }} />
-      <text x={45} y={42} textAnchor="middle" fontSize={14} fontWeight="bold" fill={color}>{score}</text>
-      <text x={45} y={56} textAnchor="middle" fontSize={8} fill="#64748b">HEALTH</text>
-    </svg>
-  );
+/* ---------- helpers ---------- */
+
+function timeLabel(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
-function RiskBar({ label, value, color }: { label: string; value: number; color: string }) {
+/* ---------- chart sub-component ---------- */
+
+function TrendChart({
+  title, icon, data, dataKey, color, unit,
+}: {
+  title: string;
+  icon: React.ReactNode;
+  data: { recorded_at: string; [k: string]: any }[];
+  dataKey: string;
+  color: string;
+  unit: string;
+}) {
+  const width = 520;
+  const height = 160;
+  const padL = 40;
+  const padR = 12;
+  const padT = 12;
+  const padB = 22;
+  const chartW = width - padL - padR;
+  const chartH = height - padT - padB;
+
+  const values = data.map((d) => Number(d[dataKey]) || 0);
+  const minVal = values.length ? Math.min(...values) : 0;
+  const maxVal = values.length ? Math.max(...values) : 1;
+  const range = maxVal - minVal || 1;
+
+  const points = data.map((d, i) => {
+    const x = padL + (data.length > 1 ? (i / (data.length - 1)) * chartW : chartW / 2);
+    const y = padT + chartH - ((Number(d[dataKey]) - minVal) / range) * chartH;
+    return { x, y, val: Number(d[dataKey]) || 0, label: timeLabel(d.recorded_at) };
+  });
+
+  const pathD = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
+  const areaD = points.length > 0
+    ? `${pathD} L ${points[points.length - 1].x.toFixed(1)} ${padT + chartH} L ${points[0].x.toFixed(1)} ${padT + chartH} Z`
+    : '';
+
+  // Y-axis labels
+  const yLabels = [0, 0.25, 0.5, 0.75, 1].map((t) => ({
+    y: padT + chartH - t * chartH,
+    val: minVal + t * range,
+  }));
+
   return (
-    <div>
-      <div className="flex justify-between mb-1">
-        <span className="text-xs text-slate-400">{label}</span>
-        <span className="text-xs font-bold" style={{ color }}>{value}%</span>
+    <div className="panel" style={{ borderRadius: 4, overflow: 'hidden' }}>
+      <div
+        className="flex items-center justify-between px-3 py-1.5"
+        style={{ background: 'linear-gradient(180deg,#151f33 0%,#0f1726 100%)', borderBottom: '1px solid var(--border-subtle)' }}
+      >
+        <div className="flex items-center gap-1.5">
+          <span style={{ color }}>{icon}</span>
+          <span className="text-xs font-semibold text-slate-200">{title}</span>
+        </div>
+        <span className="text-xs text-slate-500">Last 24h</span>
       </div>
-      <div className="h-1.5 rounded-full" style={{ background: '#1e2d45' }}>
-        <div className="h-full rounded-full transition-all" style={{ width: `${value}%`, background: color }} />
+      <div style={{ background: '#080d14', padding: 4 }}>
+        {data.length === 0 ? (
+          <div className="flex items-center justify-center" style={{ height }}>
+            <span className="text-xs text-slate-600">No data available</span>
+          </div>
+        ) : (
+          <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="xMidYMid meet">
+            {/* grid lines */}
+            {yLabels.map((yl, i) => (
+              <g key={i}>
+                <line x1={padL} y1={yl.y} x2={width - padR} y2={yl.y} stroke="#1a2540" strokeWidth={1} strokeDasharray="4,4" />
+                <text x={padL - 4} y={yl.y + 3} textAnchor="end" fontSize={9} fill="#64748b" fontFamily="monospace">
+                  {yl.val.toFixed(1)}
+                </text>
+              </g>
+            ))}
+            {/* area */}
+            {areaD && <path d={areaD} fill={color} opacity={0.08} />}
+            {/* line */}
+            <path d={pathD} fill="none" stroke={color} strokeWidth={1.5} style={{ filter: `drop-shadow(0 0 3px ${color}60)` }} />
+            {/* points */}
+            {points.map((p, i) => (
+              <g key={i}>
+                <circle cx={p.x} cy={p.y} r={2} fill={color} />
+                {i === points.length - 1 && (
+                  <text x={p.x} y={p.y - 8} textAnchor="middle" fontSize={9} fill={color} fontFamily="monospace" fontWeight={600}>
+                    {p.val.toFixed(1)}{unit}
+                  </text>
+                )}
+              </g>
+            ))}
+            {/* x-axis labels (first, middle, last) */}
+            {points.length > 0 && (
+              <>
+                <text x={points[0].x} y={height - 6} textAnchor="middle" fontSize={8} fill="#64748b" fontFamily="monospace">
+                  {points[0].label}
+                </text>
+                {points.length > 2 && (
+                  <text x={points[Math.floor(points.length / 2)].x} y={height - 6} textAnchor="middle" fontSize={8} fill="#64748b" fontFamily="monospace">
+                    {points[Math.floor(points.length / 2)].label}
+                  </text>
+                )}
+                <text x={points[points.length - 1].x} y={height - 6} textAnchor="middle" fontSize={8} fill="#64748b" fontFamily="monospace">
+                  {points[points.length - 1].label}
+                </text>
+              </>
+            )}
+          </svg>
+        )}
       </div>
     </div>
   );
 }
 
-function StatCard({ icon: Icon, label, value, sub, color }: { icon: React.ElementType; label: string; value: string; sub?: string; color: string }) {
+/* ---------- KPI card ---------- */
+
+function KpiCard({
+  icon, label, value, sublabel, color,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  sublabel?: string;
+  color: string;
+}) {
   return (
-    <div className="panel p-3 flex items-center gap-3">
-      <div className="w-9 h-9 flex items-center justify-center shrink-0" style={{ background: `${color}18`, border: `1px solid ${color}40` }}>
-        <Icon size={16} style={{ color }} />
+    <div className="panel flex items-center gap-3 px-3 py-3" style={{ borderRadius: 4 }}>
+      <div
+        className="flex items-center justify-center"
+        style={{ width: 40, height: 40, background: `${color}15`, border: `1px solid ${color}40`, borderRadius: 4, color, flexShrink: 0 }}
+      >
+        {icon}
       </div>
-      <div>
-        <div className="text-xs text-slate-400">{label}</div>
-        <div className="text-sm font-bold text-slate-200">{value}</div>
-        {sub && <div className="text-xs text-slate-600">{sub}</div>}
+      <div className="flex flex-col">
+        <span style={{ fontSize: 20, fontWeight: 700, color: '#e2e8f0', lineHeight: 1.1 }}>{value}</span>
+        <span style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{label}</span>
+        {sublabel && <span style={{ fontSize: 9, color, marginTop: 1 }}>{sublabel}</span>}
       </div>
     </div>
   );
 }
+
+/* ---------- main component ---------- */
 
 export function AnalyticsPage() {
-  const { selectedMachine, aiAnalysis, temperature, currentVal, rmsX, rmsY, rpm } = useMonitoring();
-  const [predictions, setPredictions] = useState<Prediction[]>([]);
+  const { machines, aiAnalysis } = useMonitoring();
 
+  const [snapshots, setSnapshots] = useState<any[]>([]);
+  const [healthRecords, setHealthRecords] = useState<MachineHealth[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  /* ----- fetch data ----- */
   useEffect(() => {
-    if (!selectedMachine) return;
-    supabase.from('predictions').select('*').eq('machine_id', selectedMachine.id)
-      .order('predicted_at', { ascending: false }).limit(20).then(({ data }) => setPredictions(data ?? []));
-  }, [selectedMachine]);
+    async function fetchData() {
+      setLoading(true);
 
-  if (!selectedMachine) {
-    return (
-      <div className="flex items-center justify-center h-full text-slate-500 text-sm">
-        No machine selected. Add a machine to see analytics.
-      </div>
-    );
+      // Fetch last 24h of sensor_snapshots (aggregate across machines)
+      const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const { data: snapData } = await supabase
+        .from('sensor_snapshots')
+        .select('temperature, vibration_rms, current, rpm, voltage, recorded_at')
+        .gte('recorded_at', cutoff)
+        .order('recorded_at', { ascending: true });
+
+      // Group by hour and average
+      if (snapData && snapData.length > 0) {
+        const hourly: Record<string, any> = {};
+        for (const row of snapData) {
+          const d = new Date(row.recorded_at);
+          const key = `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()} ${d.getHours()}:00`;
+          if (!hourly[key]) {
+            hourly[key] = { recorded_at: row.recorded_at, temperature: 0, vibration_rms: 0, current: 0, rpm: 0, voltage: 0, count: 0 };
+          }
+          hourly[key].temperature += row.temperature || 0;
+          hourly[key].vibration_rms += row.vibration_rms || 0;
+          hourly[key].current += row.current || 0;
+          hourly[key].rpm += row.rpm || 0;
+          hourly[key].voltage += row.voltage || 0;
+          hourly[key].count += 1;
+        }
+        const averaged = Object.values(hourly).map((h: any) => ({
+          recorded_at: h.recorded_at,
+          temperature: h.temperature / h.count,
+          vibration_rms: h.vibration_rms / h.count,
+          current: h.current / h.count,
+          rpm: h.rpm / h.count,
+          voltage: h.voltage / h.count,
+        }));
+        setSnapshots(averaged);
+      } else {
+        setSnapshots([]);
+      }
+
+      // Fetch machine_health records
+      const { data: healthData } = await supabase
+        .from('machine_health')
+        .select('machine_id, user_id, rms_x, rms_y, temperature, current, rpm, voltage, health_score, status, updated_at')
+        .order('updated_at', { ascending: false });
+
+      setHealthRecords((healthData as MachineHealth[]) ?? []);
+      setLoading(false);
+    }
+    fetchData();
+  }, []);
+
+  /* ----- KPIs ----- */
+  const totalMachines = machines.length;
+  const criticalMachines = machines.filter((m) => m.status === 'critical').length;
+  const avgHealth = aiAnalysis ? Math.round(aiAnalysis.healthScore) : 0;
+  const totalAlerts = machines.filter((m) => m.status === 'warning' || m.status === 'critical').length;
+
+  /* ----- machine name lookup ----- */
+  const machineNames = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const m of machines) map[m.id] = m.name;
+    return map;
+  }, [machines]);
+
+  /* ----- unique machine health (latest per machine) ----- */
+  const uniqueHealth = useMemo(() => {
+    const seen = new Set<string>();
+    const result: MachineHealth[] = [];
+    for (const h of healthRecords) {
+      if (!seen.has(h.machine_id)) {
+        seen.add(h.machine_id);
+        result.push(h);
+      }
+    }
+    return result;
+  }, [healthRecords]);
+
+  /* ----- export ----- */
+  function handleExport() {
+    const rows: string[] = [];
+    rows.push('Machine,Status,Health Score,Bearing Wear,Temperature (°C),Current (A),RPM,Updated At');
+    for (const h of uniqueHealth) {
+      const name = machineNames[h.machine_id] ?? h.machine_id;
+      rows.push(`${name},${h.status},${h.health_score.toFixed(1)},${(h.rms_x + h.rms_y).toFixed(2)},${h.temperature.toFixed(1)},${h.current.toFixed(2)},${h.rpm},${new Date(h.updated_at).toISOString()}`);
+    }
+    const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `veltrix-analytics-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
-  const ai = aiAnalysis;
-  const healthColor = !ai ? '#64748b' : ai.healthScore >= 70 ? '#22c55e' : ai.healthScore >= 40 ? '#eab308' : '#ef4444';
+  const healthColor = (score: number) => (score >= 80 ? '#22c55e' : score >= 50 ? '#eab308' : '#ef4444');
+  const statusColor = (status: string) =>
+    status === 'healthy' ? '#22c55e' : status === 'warning' ? '#eab308' : '#ef4444';
+
+  /* ---------- render ---------- */
 
   return (
-    <div className="flex flex-col h-full overflow-y-auto" style={{ background: '#0b0f1a' }}>
+    <div className="flex flex-col h-full overflow-hidden" style={{ background: 'var(--bg-base)' }}>
       {/* Header */}
-      <div className="px-5 py-3 shrink-0" style={{ borderBottom: '1px solid #1e2d45', background: 'linear-gradient(180deg,#111827 0%,#0b0f1a 100%)' }}>
-        <div className="flex items-center gap-2">
-          <TrendingUp size={16} className="text-blue-400" />
-          <h2 className="text-sm font-semibold text-slate-200 tracking-wide">AI ANALYTICS — {selectedMachine.name}</h2>
+      <div
+        className="flex items-center justify-between px-4 py-3 flex-shrink-0"
+        style={{ background: 'linear-gradient(180deg,#0d1525 0%,#080d14 100%)', borderBottom: '1px solid var(--border-subtle)' }}
+      >
+        <div className="flex items-center gap-3">
+          <TrendingUp size={20} style={{ color: 'var(--accent-cyan)' }} />
+          <span className="text-sm font-semibold text-slate-200 tracking-wide">ANALYTICS &amp; REPORTS</span>
         </div>
-        <div className="text-xs text-slate-500 mt-0.5">Location: {selectedMachine.location || 'N/A'}</div>
+        <button
+          onClick={handleExport}
+          className="btn-secondary flex items-center gap-1.5"
+          style={{ fontSize: 11, padding: '5px 12px' }}
+        >
+          <Download size={13} /> Export CSV
+        </button>
       </div>
 
-      <div className="p-5 space-y-5">
-        {/* Health overview */}
-        <div className="grid grid-cols-2 gap-4">
-          {/* Gauge + status */}
-          <div className="panel p-4 flex items-center gap-4">
-            <HealthGauge score={ai?.healthScore ?? 100} />
-            <div>
-              <div className="text-xs text-slate-400 mb-1">Machine Status</div>
-              <div className="text-sm font-bold mb-2" style={{ color: healthColor }}>
-                {ai?.status.toUpperCase() ?? 'HEALTHY'}
-              </div>
-              <div className="text-xs text-slate-400">RUL Estimate</div>
-              <div className="text-sm font-bold text-slate-200">{ai?.rulHours ?? '—'} hrs</div>
+      {/* Scrollable content */}
+      <div className="flex-1 overflow-y-auto p-4">
+        {/* KPI summary cards */}
+        <div className="grid gap-3 mb-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}>
+          <KpiCard icon={<Activity size={20} />} label="Total Machines" value={String(totalMachines)} color="#3b82f6" />
+          <KpiCard icon={<TrendingUp size={20} />} label="Total Alerts" value={String(totalAlerts)} color="#eab308" />
+          <KpiCard
+            icon={<Gauge size={20} />}
+            label="Avg Health Score"
+            value={avgHealth > 0 ? `${avgHealth}%` : 'N/A'}
+            sublabel={avgHealth >= 80 ? 'Healthy' : avgHealth >= 50 ? 'Warning' : 'Critical'}
+            color={healthColor(avgHealth)}
+          />
+          <KpiCard icon={<Zap size={20} />} label="Critical Machines" value={String(criticalMachines)} color="#ef4444" />
+        </div>
+
+        {/* Charts */}
+        <div className="grid gap-3 mb-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(540px, 1fr))' }}>
+          <TrendChart
+            title="Temperature Trend"
+            icon={<Thermometer size={13} />}
+            data={snapshots}
+            dataKey="temperature"
+            color="#fb923c"
+            unit="°C"
+          />
+          <TrendChart
+            title="Current Trend"
+            icon={<Zap size={13} />}
+            data={snapshots}
+            dataKey="current"
+            color="#60a5fa"
+            unit="A"
+          />
+          <TrendChart
+            title="Vibration RMS Trend"
+            icon={<Activity size={13} />}
+            data={snapshots}
+            dataKey="vibration_rms"
+            color="#22d3ee"
+            unit="g"
+          />
+        </div>
+
+        {/* Machine health table */}
+        <div className="panel" style={{ borderRadius: 4, overflow: 'hidden' }}>
+          <div
+            className="flex items-center justify-between px-3 py-1.5"
+            style={{ background: 'linear-gradient(180deg,#151f33 0%,#0f1726 100%)', borderBottom: '1px solid var(--border-subtle)' }}
+          >
+            <span className="text-xs font-semibold text-slate-200">Machine Health Report</span>
+            <span className="text-xs text-slate-500">{uniqueHealth.length} machines</span>
+          </div>
+
+          {loading ? (
+            <div className="flex items-center justify-center py-8">
+              <span className="animate-spin" style={{ display: 'inline-block', width: 20, height: 20, border: '2px solid #3b82f6', borderTopColor: 'transparent', borderRadius: '50%' }} />
             </div>
-          </div>
-
-          {/* Risk breakdown */}
-          <div className="panel p-4 space-y-3">
-            <div className="text-xs font-semibold text-slate-300 mb-2">RISK BREAKDOWN</div>
-            <RiskBar label="Bearing Wear" value={ai?.bearingWear ?? 0} color="#f97316" />
-            <RiskBar label="Overheat Risk" value={ai?.overheatRisk ?? 0} color="#ef4444" />
-            <RiskBar label="Failure Risk" value={ai?.failureRisk ?? 0} color="#eab308" />
-          </div>
-        </div>
-
-        {/* Live sensor stats */}
-        <div className="grid grid-cols-4 gap-3">
-          <StatCard icon={Thermometer} label="Temperature" value={`${temperature.toFixed(1)}°C`} sub={`Max: ${selectedMachine.temp_max}°C`} color="#ef4444" />
-          <StatCard icon={Activity} label="Vibration RMS" value={`${((rmsX + rmsY) / 2).toFixed(2)}g`} sub={`X:${rmsX.toFixed(2)} Y:${rmsY.toFixed(2)}`} color="#3b82f6" />
-          <StatCard icon={Zap} label="Current" value={`${currentVal.toFixed(1)}A`} sub={`Max: ${selectedMachine.current_max}A`} color="#eab308" />
-          <StatCard icon={Cpu} label="RPM" value={String(rpm)} sub="Target: 1450 RPM" color="#22c55e" />
-        </div>
-
-        {/* AI Recommendation */}
-        <div className="panel p-4">
-          <div className="text-xs font-semibold text-slate-300 mb-2 flex items-center gap-1.5">
-            <TrendingUp size={11} className="text-blue-400" />
-            AI RECOMMENDATION
-          </div>
-          <p className="text-xs text-slate-300 leading-relaxed">{ai?.recommendation ?? 'No data yet.'}</p>
-          {ai && ai.anomalies.length > 0 && (
-            <div className="mt-3 space-y-1">
-              {ai.anomalies.map((anom, i) => (
-                <div key={i} className="flex items-center gap-2 text-xs" style={{ color: '#facc15' }}>
-                  <span style={{ width: 4, height: 4, background: '#eab308', borderRadius: '50%', flexShrink: 0 }} />
-                  {anom}
-                </div>
-              ))}
+          ) : uniqueHealth.length === 0 ? (
+            <div className="flex items-center justify-center py-8 text-xs text-slate-600">
+              No health data available. Start monitoring to collect data.
             </div>
-          )}
-        </div>
-
-        {/* Prediction history mini-chart */}
-        <div className="panel p-4">
-          <div className="text-xs font-semibold text-slate-300 mb-3">HEALTH SCORE HISTORY</div>
-          {predictions.length === 0 ? (
-            <div className="text-xs text-slate-500 text-center py-4">No predictions yet — monitoring will generate them automatically</div>
           ) : (
-            <div className="flex items-end gap-1 h-20">
-              {predictions.slice().reverse().map((p, i) => {
-                const c = p.health_score >= 70 ? '#22c55e' : p.health_score >= 40 ? '#eab308' : '#ef4444';
+            <div style={{ overflowX: 'auto' }}>
+              {/* Table header */}
+              <div
+                className="flex items-center gap-3 px-3 py-2 text-xs font-semibold text-slate-400 uppercase tracking-wide"
+                style={{ background: '#0a1020', borderBottom: '1px solid var(--border-subtle)', minWidth: 800 }}
+              >
+                <span style={{ width: 160 }}>Machine</span>
+                <span style={{ width: 80, textAlign: 'center' }}>Status</span>
+                <span style={{ width: 90, textAlign: 'right' }}>Health Score</span>
+                <span style={{ width: 90, textAlign: 'right' }}>Bearing Wear</span>
+                <span style={{ width: 90, textAlign: 'right' }}>Temp (°C)</span>
+                <span style={{ width: 80, textAlign: 'right' }}>Current (A)</span>
+                <span style={{ width: 80, textAlign: 'right' }}>RPM</span>
+                <span style={{ flex: 1, textAlign: 'right' }}>Updated</span>
+              </div>
+
+              {/* Rows */}
+              {uniqueHealth.map((h) => {
+                const name = machineNames[h.machine_id] ?? h.machine_id.slice(0, 8);
+                const bearingWear = (h.rms_x + h.rms_y) / 2;
                 return (
-                  <div key={i} className="flex flex-col items-center gap-0.5" style={{ flex: 1 }}>
-                    <div style={{ width: '100%', height: `${p.health_score}%`, maxHeight: 72, background: c, opacity: 0.8, minHeight: 2 }} title={`${p.health_score}%`} />
+                  <div
+                    key={h.machine_id}
+                    className="flex items-center gap-3 px-3 py-2 text-xs"
+                    style={{ borderBottom: '1px solid #0d1525', minWidth: 800 }}
+                  >
+                    <span style={{ width: 160 }} className="text-slate-200 font-medium truncate">{name}</span>
+                    <span style={{ width: 80, textAlign: 'center' }}>
+                      <span
+                        style={{
+                          fontSize: 9, padding: '2px 6px', borderRadius: 2,
+                          background: `${statusColor(h.status)}15`, color: statusColor(h.status),
+                          fontWeight: 600, textTransform: 'uppercase',
+                        }}
+                      >
+                        {h.status}
+                      </span>
+                    </span>
+                    <span style={{ width: 90, textAlign: 'right', fontFamily: 'monospace', color: healthColor(h.health_score), fontWeight: 600 }}>
+                      {h.health_score.toFixed(1)}%
+                    </span>
+                    <span style={{ width: 90, textAlign: 'right', fontFamily: 'monospace', color: '#22d3ee' }}>
+                      {bearingWear.toFixed(2)} g
+                    </span>
+                    <span style={{ width: 90, textAlign: 'right', fontFamily: 'monospace', color: '#fb923c' }}>
+                      {h.temperature.toFixed(1)}
+                    </span>
+                    <span style={{ width: 80, textAlign: 'right', fontFamily: 'monospace', color: '#60a5fa' }}>
+                      {h.current.toFixed(2)}
+                    </span>
+                    <span style={{ width: 80, textAlign: 'right', fontFamily: 'monospace', color: '#4ade80' }}>
+                      {h.rpm}
+                    </span>
+                    <span style={{ flex: 1, textAlign: 'right', color: '#64748b' }}>
+                      {new Date(h.updated_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    </span>
                   </div>
                 );
               })}
             </div>
           )}
-          {predictions.length > 0 && (
-            <div className="flex justify-between mt-1">
-              <span className="text-xs text-slate-600">Oldest</span>
-              <span className="text-xs text-slate-600">Latest</span>
-            </div>
-          )}
-        </div>
-
-        {/* Thresholds */}
-        <div className="panel p-4">
-          <div className="text-xs font-semibold text-slate-300 mb-3 flex items-center gap-1.5">
-            <Clock size={11} className="text-blue-400" />
-            CONFIGURED THRESHOLDS
-          </div>
-          <div className="grid grid-cols-3 gap-4 text-xs">
-            <div>
-              <div className="text-slate-500 mb-1">Vibration RMS</div>
-              <div className="val-blue">{selectedMachine.rms_min} – {selectedMachine.rms_max} g</div>
-            </div>
-            <div>
-              <div className="text-slate-500 mb-1">Temperature</div>
-              <div className="val-orange">{selectedMachine.temp_min} – {selectedMachine.temp_max} °C</div>
-            </div>
-            <div>
-              <div className="text-slate-500 mb-1">Current</div>
-              <div className="val-yellow">{selectedMachine.current_min} – {selectedMachine.current_max} A</div>
-            </div>
-          </div>
         </div>
       </div>
     </div>
   );
 }
+
+export default AnalyticsPage;

@@ -1,88 +1,86 @@
-import { useMemo } from 'react';
-import type { TrendPoint } from '../hooks/useSimulatedData';
+interface TrendPoint { t: number; v: number; }
 
-interface Props {
+interface TemperatureChartProps {
   data: TrendPoint[];
-  temperature: number;
 }
 
-const W = 320;
-const H = 160;
-const PAD = { top: 8, right: 8, bottom: 28, left: 8 };
-const TEMP_MIN = 76.5;
-const TEMP_MAX = 82.0;
+const WIDTH = 600;
+const HEIGHT = 120;
+const PADDING = { top: 8, right: 8, bottom: 16, left: 32 };
 
-function scaleX(t: number, total: number) {
-  return PAD.left + (t / (total - 1)) * (W - PAD.left - PAD.right);
-}
-function scaleY(v: number) {
-  return PAD.top + ((TEMP_MAX - v) / (TEMP_MAX - TEMP_MIN)) * (H - PAD.top - PAD.bottom);
-}
+const COLORS = {
+  bg: '#080d14',
+  border: '#1e2d45',
+  text: '#94a3b8',
+  grid: '#1a2540',
+  line: '#f97316',
+  area: 'rgba(249,115,22,0.15)',
+};
 
-export function TemperatureChart({ data, temperature }: Props) {
-  const linePath = useMemo(() => {
-    if (!data.length) return '';
-    return data
-      .map((p, i) => `${i === 0 ? 'M' : 'L'}${scaleX(i, data.length).toFixed(1)},${scaleY(p.value).toFixed(1)}`)
-      .join(' ');
-  }, [data]);
+export default function TemperatureChart({ data }: TemperatureChartProps) {
+  const points = data.slice(-60);
+  const plotW = WIDTH - PADDING.left - PADDING.right;
+  const plotH = HEIGHT - PADDING.top - PADDING.bottom;
 
-  const chartW = W - PAD.left - PAD.right;
-  const chartH = H - PAD.top - PAD.bottom;
-  const zoneH = chartH / 4;
+  const values = points.map((p) => p.v);
+  const rawMax = values.length > 0 ? Math.max(...values) : 100;
+  const rawMin = values.length > 0 ? Math.min(...values) : 0;
+  const range = rawMax - rawMin || 1;
+  const yMax = rawMax + range * 0.15;
+  const yMin = Math.max(0, rawMin - range * 0.15);
 
-  // Dot positions (evenly spaced subset)
-  const dotPoints = data.filter((_, i) => i % 4 === 0);
+  const xScale = (i: number) => PADDING.left + (points.length <= 1 ? 0 : (i / (points.length - 1)) * plotW);
+  const yScale = (v: number) => PADDING.top + ((yMax - v) / (yMax - yMin)) * plotH;
+
+  const linePath =
+    points.length === 0
+      ? ''
+      : points.map((p, i) => `${i === 0 ? 'M' : 'L'}${xScale(i).toFixed(1)},${yScale(p.v).toFixed(1)}`).join(' ');
+
+  const areaPath =
+    points.length === 0
+      ? ''
+      : `${linePath} L${xScale(points.length - 1).toFixed(1)},${(PADDING.top + plotH).toFixed(1)} L${xScale(0).toFixed(1)},${(PADDING.top + plotH).toFixed(1)} Z`;
+
+  const gridLines = 3;
+  const yTicks = Array.from({ length: gridLines + 1 }, (_, i) => yMin + ((yMax - yMin) * i) / gridLines);
 
   return (
-    <svg
-      viewBox={`0 0 ${W} ${H}`}
-      width="100%"
-      height="100%"
-      preserveAspectRatio="none"
-      style={{ display: 'block' }}
-    >
-      <defs>
-        <clipPath id="chartClip">
-          <rect x={PAD.left} y={PAD.top} width={chartW} height={chartH} />
-        </clipPath>
-      </defs>
-
-      {/* Heat zone background */}
-      <rect x={PAD.left} y={PAD.top} width={chartW} height={zoneH} fill="#dc2626" opacity={0.75} />
-      <rect x={PAD.left} y={PAD.top + zoneH} width={chartW} height={zoneH} fill="#f97316" opacity={0.7} />
-      <rect x={PAD.left} y={PAD.top + zoneH * 2} width={chartW} height={zoneH} fill="#eab308" opacity={0.65} />
-      <rect x={PAD.left} y={PAD.top + zoneH * 3} width={chartW} height={zoneH} fill="#16a34a" opacity={0.6} />
-
-      {/* Grid overlay */}
-      {[0.25, 0.5, 0.75].map((f) => {
-        const y = PAD.top + chartH * f;
-        return <line key={f} x1={PAD.left} y1={y} x2={W - PAD.right} y2={y} stroke="rgba(255,255,255,0.12)" strokeWidth={0.8} strokeDasharray="4,4" />;
-      })}
-
-      {/* Trend line */}
-      <path d={linePath} fill="none" stroke="#fbbf24" strokeWidth={2} clipPath="url(#chartClip)" />
-
-      {/* Dots on line */}
-      {dotPoints.map((p, i) => {
-        const idx = data.indexOf(p);
-        const x = scaleX(idx, data.length);
-        const y = scaleY(p.value);
-        return (
-          <circle key={i} cx={x} cy={y} r={3} fill="#fbbf24" clipPath="url(#chartClip)" />
-        );
-      })}
-
-      {/* Border */}
-      <rect x={PAD.left} y={PAD.top} width={chartW} height={chartH} fill="none" stroke="#1e2d45" strokeWidth={0.8} />
-
-      {/* Y axis labels */}
-      <text x={W - PAD.right + 2} y={PAD.top + 6} fontSize={7} fill="#9ca3af" textAnchor="start">High</text>
-      <text x={W - PAD.right + 2} y={PAD.top + zoneH * 2 + 6} fontSize={7} fill="#9ca3af" textAnchor="start">High</text>
-      <text x={W - PAD.right + 2} y={PAD.top + zoneH * 3 + 6} fontSize={7} fill="#9ca3af" textAnchor="start">{temperature.toFixed(1)}</text>
-
-      {/* X axis label */}
-      <text x={W / 2} y={H - 2} textAnchor="middle" fontSize={8} fill="#4a5f7a">Time</text>
-    </svg>
+    <div className="panel chart-bg" style={{ padding: 0 }}>
+      <div
+        className="flex items-center justify-between px-3 py-1.5"
+        style={{ borderBottom: `1px solid ${COLORS.border}` }}
+      >
+        <span className="text-[10px] font-semibold tracking-wider" style={{ color: COLORS.text }}>
+          TEMPERATURE TREND
+        </span>
+        <span className="text-[9px]" style={{ color: COLORS.text }}>
+          °C
+        </span>
+      </div>
+      <svg width="100%" height={HEIGHT} viewBox={`0 0 ${WIDTH} ${HEIGHT}`} preserveAspectRatio="none" style={{ display: 'block' }}>
+        {/* Grid lines */}
+        {yTicks.map((tick, i) => (
+          <g key={i}>
+            <line
+              x1={PADDING.left}
+              x2={WIDTH - PADDING.right}
+              y1={yScale(tick)}
+              y2={yScale(tick)}
+              stroke={COLORS.grid}
+              strokeWidth={1}
+              strokeDasharray="4,4"
+            />
+            <text x={4} y={yScale(tick) + 3} fontSize={8} fill={COLORS.text}>
+              {tick.toFixed(0)}
+            </text>
+          </g>
+        ))}
+        {/* Area fill */}
+        {areaPath && <path d={areaPath} fill={COLORS.area} />}
+        {/* Line */}
+        <path d={linePath} fill="none" stroke={COLORS.line} strokeWidth={1.5} strokeLinejoin="round" />
+      </svg>
+    </div>
   );
 }

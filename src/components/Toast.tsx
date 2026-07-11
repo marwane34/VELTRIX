@@ -1,76 +1,35 @@
-import { createContext, useCallback, useContext, useState, ReactNode } from 'react';
-import { CheckCircle, XCircle, AlertTriangle, Info, X } from 'lucide-react';
+import { createContext, useContext, useState, ReactNode, useCallback } from 'react';
+import { CheckCircle, AlertCircle, Info, X } from 'lucide-react';
 
-type ToastType = 'success' | 'error' | 'warning' | 'info';
+type ToastType = 'success' | 'error' | 'info';
+interface Toast { id: string; message: string; type: ToastType; }
 
-interface ToastItem {
-  id: number;
-  type: ToastType;
-  message: string;
-}
-
-interface ToastContextValue {
-  toast: (message: string, type?: ToastType) => void;
-}
-
-const ToastContext = createContext<ToastContextValue | null>(null);
-
-let nextId = 0;
+const ToastContext = createContext<{ toast: (msg: string, type?: ToastType) => void } | null>(null);
 
 export function ToastProvider({ children }: { children: ReactNode }) {
-  const [items, setItems] = useState<ToastItem[]>([]);
+  const [toasts, setToasts] = useState<Toast[]>([]);
 
   const toast = useCallback((message: string, type: ToastType = 'info') => {
-    const id = ++nextId;
-    setItems((prev) => [...prev, { id, type, message }]);
-    setTimeout(() => {
-      setItems((prev) => prev.filter((t) => t.id !== id));
-    }, 3000);
+    const id = Math.random().toString(36).slice(2);
+    setToasts(prev => [...prev, { id, message, type }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3000);
   }, []);
-
-  const dismiss = useCallback((id: number) => {
-    setItems((prev) => prev.filter((t) => t.id !== id));
-  }, []);
-
-  const icons: Record<ToastType, ReactNode> = {
-    success: <CheckCircle size={14} className="text-green-400 shrink-0" />,
-    error: <XCircle size={14} className="text-red-400 shrink-0" />,
-    warning: <AlertTriangle size={14} className="text-yellow-400 shrink-0" />,
-    info: <Info size={14} className="text-blue-400 shrink-0" />,
-  };
-
-  const colors: Record<ToastType, string> = {
-    success: '#14532d',
-    error: '#7f1d1d',
-    warning: '#854d0e',
-    info: '#1e3a5f',
-  };
 
   return (
     <ToastContext.Provider value={{ toast }}>
       {children}
-      <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2" style={{ pointerEvents: 'none' }}>
-        {items.map((item) => (
-          <div
-            key={item.id}
-            className="flex items-center gap-2 px-3 py-2.5 shadow-lg"
-            style={{
-              background: '#0e1726',
-              border: `1px solid ${colors[item.type]}`,
-              borderLeft: `3px solid ${colors[item.type]}`,
-              pointerEvents: 'auto',
-              animation: 'toast-slide-in 0.2s ease-out',
-              minWidth: 240,
-              maxWidth: 360,
-            }}
-          >
-            {icons[item.type]}
-            <span className="text-xs text-slate-200 flex-1">{item.message}</span>
-            <button onClick={() => dismiss(item.id)} className="text-slate-600 hover:text-slate-400 shrink-0">
-              <X size={12} />
-            </button>
-          </div>
-        ))}
+      <div className="fixed top-4 right-4 z-[100] flex flex-col gap-2">
+        {toasts.map(t => {
+          const Icon = t.type === 'success' ? CheckCircle : t.type === 'error' ? AlertCircle : Info;
+          const color = t.type === 'success' ? '#22c55e' : t.type === 'error' ? '#ef4444' : '#3b82f6';
+          return (
+            <div key={t.id} className="flex items-center gap-2 px-3 py-2" style={{ background: '#0e1726', border: `1px solid ${color}40`, boxShadow: '0 4px 20px rgba(0,0,0,0.5)', animation: 'toast-slide-in 0.3s ease' }}>
+              <Icon size={14} style={{ color }} />
+              <span className="text-xs text-slate-200">{t.message}</span>
+              <button onClick={() => setToasts(prev => prev.filter(x => x.id !== t.id))} className="text-slate-500 hover:text-slate-300 ml-2"><X size={12} /></button>
+            </div>
+          );
+        })}
       </div>
     </ToastContext.Provider>
   );

@@ -1,143 +1,98 @@
-import type { FreqBar } from '../hooks/useSimulatedData';
+interface FreqBar { freq: number; amp: number; }
 
-interface Props {
-  bars: FreqBar[];
+interface FrequencyChartProps {
+  data: FreqBar[];
 }
 
-const W = 440;
-const H = 160;
-const PAD = { top: 8, right: 8, bottom: 28, left: 30 };
-const FREQ_MIN = 0.7;
-const FREQ_MAX = 5.9;
-const AMP_MAX = 1.0;
+const WIDTH = 600;
+const HEIGHT = 150;
+const PADDING = { top: 8, right: 8, bottom: 18, left: 32 };
 
-function scaleX(f: number) {
-  return PAD.left + ((f - FREQ_MIN) / (FREQ_MAX - FREQ_MIN)) * (W - PAD.left - PAD.right);
-}
-function scaleY(v: number) {
-  return PAD.top + (1 - v / AMP_MAX) * (H - PAD.top - PAD.bottom);
-}
+const COLORS = {
+  bg: '#080d14',
+  border: '#1e2d45',
+  text: '#94a3b8',
+  grid: '#1a2540',
+  bar: '#3b82f6',
+};
 
-const AMP_TICKS = [0.8, 0.6, 0.4, 0.2];
-const FREQ_LABELS = ['1.0', '2.0', '3.0', '4.0', '5.0'];
-const BAR_WIDTH = 10;
+export default function FrequencyChart({ data }: FrequencyChartProps) {
+  const bars = data.slice(-32);
+  const plotW = WIDTH - PADDING.left - PADDING.right;
+  const plotH = HEIGHT - PADDING.top - PADDING.bottom;
 
-const ANNOTATIONS = [
-  { freq: 1.0, label: '1x RPM', dx: -4, dy: -4 },
-  { freq: 2.0, label: '2x RPM', dx: -6, dy: -4 },
-  { freq: 5.0, label: 'Bearing Fault', dx: -28, dy: -4 },
-];
+  const maxAmp = Math.max(0.1, ...bars.map((b) => b.amp));
+  const barGap = 2;
+  const barWidth = bars.length > 0 ? (plotW / bars.length) - barGap : 0;
 
-export function FrequencyChart({ bars }: Props) {
+  const yScale = (v: number) => PADDING.top + (1 - v / maxAmp) * plotH;
+
+  const gridLines = 4;
+  const yTicks = Array.from({ length: gridLines + 1 }, (_, i) => (maxAmp * i) / gridLines);
+
   return (
-    <svg
-      viewBox={`0 0 ${W} ${H}`}
-      width="100%"
-      height="100%"
-      preserveAspectRatio="none"
-      style={{ display: 'block' }}
-    >
-      <rect x={PAD.left} y={PAD.top} width={W - PAD.left - PAD.right} height={H - PAD.top - PAD.bottom} fill="#070c14" />
-
-      {/* Grid */}
-      {AMP_TICKS.map((v) => {
-        const y = scaleY(v);
-        return (
-          <g key={v}>
-            <line x1={PAD.left} y1={y} x2={W - PAD.right} y2={y} stroke="#1a2540" strokeWidth={0.7} strokeDasharray="3,3" />
-            <text x={PAD.left - 3} y={y + 3} textAnchor="end" fontSize={7} fill="#4a5f7a">{v}</text>
-          </g>
-        );
-      })}
-
-      {/* Bars */}
-      {bars.map((bar, i) => {
-        const x = scaleX(bar.freq);
-        const barH = (H - PAD.top - PAD.bottom) * bar.amplitude;
-        const y = H - PAD.bottom - barH;
-        const baseColor = bar.isRed ? '#ef4444' : bar.amplitude > 0.35 ? '#9ca3af' : '#6b7280';
-        const topColor = bar.isRed ? '#f87171' : bar.amplitude > 0.35 ? '#e5e7eb' : '#9ca3af';
-        return (
-          <g key={i}>
-            <defs>
-              <linearGradient id={`bg${i}`} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={topColor} stopOpacity={0.9} />
-                <stop offset="100%" stopColor={baseColor} stopOpacity={0.6} />
-              </linearGradient>
-            </defs>
-            <rect
-              x={x - BAR_WIDTH / 2}
-              y={y}
-              width={BAR_WIDTH}
-              height={barH}
-              fill={`url(#bg${i})`}
-            />
-          </g>
-        );
-      })}
-
-      {/* Annotation arrows for labeled peaks */}
-      {ANNOTATIONS.map((ann) => {
-        const bar = bars.find((b) => Math.abs(b.freq - ann.freq) < 0.15);
-        if (!bar) return null;
-        const x = scaleX(bar.freq);
-        const barH = (H - PAD.top - PAD.bottom) * bar.amplitude;
-        const y = H - PAD.bottom - barH;
-        return (
-          <g key={ann.label}>
-            <text
-              x={x + ann.dx}
-              y={y + ann.dy - 2}
-              fontSize={7.5}
-              fill="#c8d6ea"
-            >
-              {ann.label}
-            </text>
-            {ann.label === 'Bearing Fault' && (
-              <line
-                x1={x + ann.dx + 22}
-                y1={y + ann.dy + 2}
-                x2={x}
-                y2={y}
-                stroke="#ef4444"
-                strokeWidth={1}
-                markerEnd="url(#arrow)"
-              />
-            )}
-          </g>
-        );
-      })}
-
-      <defs>
-        <marker id="arrow" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
-          <path d="M0,0 L6,3 L0,6 Z" fill="#ef4444" />
-        </marker>
-      </defs>
-
-      {/* Axes */}
-      <rect x={PAD.left} y={PAD.top} width={W - PAD.left - PAD.right} height={H - PAD.top - PAD.bottom} fill="none" stroke="#1e2d45" strokeWidth={0.8} />
-
-      {/* Freq labels */}
-      {FREQ_LABELS.map((label) => {
-        const f = parseFloat(label);
-        const x = scaleX(f);
-        return (
-          <text key={label} x={x} y={H - 14} textAnchor="middle" fontSize={7.5} fill="#4a5f7a">{label}</text>
-        );
-      })}
-
-      {/* Axis labels */}
-      <text x={W / 2} y={H - 2} textAnchor="middle" fontSize={8} fill="#4a5f7a">Frequency (Hz)</text>
-      <text
-        x={10}
-        y={H / 2}
-        textAnchor="middle"
-        fontSize={8}
-        fill="#4a5f7a"
-        transform={`rotate(-90, 10, ${H / 2})`}
+    <div className="panel chart-bg" style={{ padding: 0 }}>
+      <div
+        className="flex items-center justify-between px-3 py-1.5"
+        style={{ borderBottom: `1px solid ${COLORS.border}` }}
       >
-        Amplitude
-      </text>
-    </svg>
+        <span className="text-[10px] font-semibold tracking-wider" style={{ color: COLORS.text }}>
+          FREQUENCY SPECTRUM
+        </span>
+        <span className="text-[9px]" style={{ color: COLORS.text }}>
+          Hz
+        </span>
+      </div>
+      <svg width="100%" height={HEIGHT} viewBox={`0 0 ${WIDTH} ${HEIGHT}`} preserveAspectRatio="none" style={{ display: 'block' }}>
+        {/* Horizontal grid lines */}
+        {yTicks.map((tick, i) => (
+          <g key={i}>
+            <line
+              x1={PADDING.left}
+              x2={WIDTH - PADDING.right}
+              y1={yScale(tick)}
+              y2={yScale(tick)}
+              stroke={COLORS.grid}
+              strokeWidth={1}
+              strokeDasharray="4,4"
+            />
+            <text x={4} y={yScale(tick) + 3} fontSize={8} fill={COLORS.text}>
+              {tick.toFixed(2)}
+            </text>
+          </g>
+        ))}
+        {/* Bars */}
+        {bars.map((b, i) => {
+          const x = PADDING.left + i * (barWidth + barGap);
+          const y = yScale(b.amp);
+          const h = PADDING.top + plotH - y;
+          return (
+            <rect
+              key={i}
+              x={x}
+              y={y}
+              width={Math.max(0, barWidth)}
+              height={Math.max(0, h)}
+              fill={COLORS.bar}
+              opacity={0.85}
+            />
+          );
+        })}
+        {/* X axis labels (first, middle, last) */}
+        {bars.length > 0 && (
+          <>
+            <text x={PADDING.left} y={HEIGHT - 5} fontSize={8} fill={COLORS.text}>
+              {bars[0].freq}
+            </text>
+            <text x={PADDING.left + plotW / 2 - 10} y={HEIGHT - 5} fontSize={8} fill={COLORS.text}>
+              {bars[Math.floor(bars.length / 2)]?.freq}
+            </text>
+            <text x={WIDTH - PADDING.right - 24} y={HEIGHT - 5} fontSize={8} fill={COLORS.text}>
+              {bars[bars.length - 1].freq}
+            </text>
+          </>
+        )}
+      </svg>
+    </div>
   );
 }

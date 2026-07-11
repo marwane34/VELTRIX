@@ -1,134 +1,145 @@
-import { useEffect, useState } from 'react';
-import { X, History, AlertTriangle, CheckCircle, TrendingUp } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { X, Loader2, Clock } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import type { Machine, Alert, Prediction } from '../types';
+import type { Machine, SensorSnapshot } from '../types';
 
-interface Props {
+interface ViewHistoryModalProps {
   machine: Machine | null;
   onClose: () => void;
 }
 
-type Tab = 'alerts' | 'predictions' | 'maintenance';
+const COLORS = {
+  border: '#1e2d45',
+  text: '#94a3b8',
+  grid: '#1a2540',
+};
 
-interface MaintenanceLog {
-  id: string;
-  action: string;
-  notes: string;
-  performed_by: string;
-  performed_at: string;
-}
-
-export function ViewHistoryModal({ machine, onClose }: Props) {
-  const [tab, setTab] = useState<Tab>('alerts');
-  const [alerts, setAlerts] = useState<Alert[]>([]);
-  const [predictions, setPredictions] = useState<Prediction[]>([]);
-  const [logs, setLogs] = useState<MaintenanceLog[]>([]);
+export default function ViewHistoryModal({ machine, onClose }: ViewHistoryModalProps) {
+  const [snapshots, setSnapshots] = useState<SensorSnapshot[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!machine) return;
     setLoading(true);
-    Promise.all([
-      supabase.from('alerts').select('*').eq('machine_id', machine.id).order('created_at', { ascending: false }).limit(50),
-      supabase.from('predictions').select('*').eq('machine_id', machine.id).order('predicted_at', { ascending: false }).limit(30),
-      supabase.from('maintenance_logs').select('*').eq('machine_id', machine.id).order('performed_at', { ascending: false }).limit(30),
-    ]).then(([a, p, m]) => {
-      setAlerts(a.data ?? []);
-      setPredictions(p.data ?? []);
-      setLogs(m.data ?? []);
-      setLoading(false);
-    });
+    setError(null);
+    supabase
+      .from('sensor_snapshots')
+      .select('*')
+      .eq('machine_id', machine.id)
+      .order('recorded_at', { ascending: false })
+      .limit(50)
+      .then(({ data, error: fetchError }) => {
+        setLoading(false);
+        if (fetchError) {
+          setError(fetchError.message);
+          return;
+        }
+        setSnapshots((data as SensorSnapshot[]) ?? []);
+      });
   }, [machine]);
 
-  function formatTime(ts: string) {
-    return new Date(ts).toLocaleString(undefined, { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  if (!machine) return null;
+
+  function formatTime(iso: string) {
+    const d = new Date(iso);
+    return d.toLocaleString('en-US', {
+      month: 'short',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
   }
 
-  const tabStyle = (active: boolean) => ({
-    padding: '5px 12px', fontSize: 11, cursor: 'pointer',
-    background: active ? 'linear-gradient(180deg,#1a3a6a 0%,#0f2040 100%)' : 'transparent',
-    border: `1px solid ${active ? '#3b82f6' : '#1e2d45'}`,
-    color: active ? '#93c5fd' : '#64748b',
-  } as React.CSSProperties);
+  const thStyle: React.CSSProperties = {
+    color: COLORS.text,
+    fontWeight: 600,
+    textAlign: 'left',
+    padding: '6px 8px',
+    borderBottom: `1px solid ${COLORS.border}`,
+    fontSize: 10,
+  };
+
+  const tdStyle: React.CSSProperties = {
+    color: '#c8d6ea',
+    padding: '5px 8px',
+    borderBottom: `1px solid ${COLORS.grid}`,
+    fontSize: 10,
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.7)' }}>
-      <div className="w-full max-w-2xl" style={{ background: '#0e1726', border: '1px solid #1e2d45', boxShadow: '0 0 40px rgba(0,0,0,0.8)', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
-        <div className="flex items-center justify-between px-4 py-3 shrink-0" style={{ borderBottom: '1px solid #1e2d45', background: 'linear-gradient(180deg,#151f33 0%,#0f1726 100%)' }}>
-          <div className="flex items-center gap-2">
-            <History size={13} className="text-blue-400" />
-            <span className="text-xs font-semibold text-slate-200 tracking-wide">HISTORY — {machine?.name}</span>
+      <div
+        className="w-full max-w-2xl"
+        style={{ background: '#0e1726', border: `1px solid ${COLORS.border}`, boxShadow: '0 0 40px rgba(0,0,0,0.8)' }}
+      >
+        {/* Header */}
+        <div
+          className="flex items-center justify-between px-4 py-3"
+          style={{
+            borderBottom: `1px solid ${COLORS.border}`,
+            background: 'linear-gradient(180deg,#151f33 0%,#0f1726 100%)',
+          }}
+        >
+          <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-200 tracking-wide">
+            <Clock size={13} className="text-slate-400" />
+            HISTORY — {machine.name}
+          </span>
+          <button onClick={onClose}>
+            <X size={14} className="text-slate-500 hover:text-slate-300" />
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="p-4">
+          {loading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 size={20} className="animate-spin" style={{ color: COLORS.text }} />
+            </div>
+          ) : error ? (
+            <div className="text-[11px] px-3 py-2" style={{ color: '#ef4444', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)' }}>
+              {error}
+            </div>
+          ) : snapshots.length === 0 ? (
+            <div className="text-[11px] text-center py-12" style={{ color: COLORS.text }}>
+              No history available
+            </div>
+          ) : (
+            <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+              <table className="w-full" style={{ borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr>
+                    <th style={thStyle}>Time</th>
+                    <th style={thStyle}>Temp (°C)</th>
+                    <th style={thStyle}>Vib RMS</th>
+                    <th style={thStyle}>Current (A)</th>
+                    <th style={thStyle}>RPM</th>
+                    <th style={thStyle}>Voltage</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {snapshots.map((s) => (
+                    <tr key={s.id} style={{ transition: 'background 0.15s' }}>
+                      <td style={tdStyle}>{formatTime(s.recorded_at)}</td>
+                      <td style={{ ...tdStyle, color: '#fb923c' }}>{s.temperature.toFixed(1)}</td>
+                      <td style={{ ...tdStyle, color: '#60a5fa' }}>{s.vibration_rms.toFixed(3)}</td>
+                      <td style={{ ...tdStyle, color: '#facc15' }}>{s.current.toFixed(2)}</td>
+                      <td style={{ ...tdStyle, color: '#22d3ee' }}>{s.rpm}</td>
+                      <td style={{ ...tdStyle, color: '#94a3b8' }}>{s.voltage.toFixed(1)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Footer */}
+          <div className="flex justify-end pt-3">
+            <button onClick={onClose} className="btn-secondary">
+              Close
+            </button>
           </div>
-          <button onClick={onClose}><X size={14} className="text-slate-500 hover:text-slate-300" /></button>
-        </div>
-
-        <div className="flex gap-1 px-4 pt-3 shrink-0">
-          <button style={tabStyle(tab === 'alerts')} onClick={() => setTab('alerts')}>Alerts ({alerts.length})</button>
-          <button style={tabStyle(tab === 'predictions')} onClick={() => setTab('predictions')}>Predictions ({predictions.length})</button>
-          <button style={tabStyle(tab === 'maintenance')} onClick={() => setTab('maintenance')}>Maintenance ({logs.length})</button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-4">
-          {loading && <div className="text-xs text-slate-500 text-center py-8">Loading...</div>}
-
-          {!loading && tab === 'alerts' && (
-            <div className="space-y-1">
-              {alerts.length === 0 && <div className="text-xs text-slate-500 text-center py-8">No alerts recorded</div>}
-              {alerts.map((a) => (
-                <div key={a.id} className="flex items-start gap-3 px-3 py-2" style={{ background: '#080d14', borderBottom: '1px solid #1a2540' }}>
-                  {a.severity === 'critical' ? <AlertTriangle size={11} className="text-red-400 mt-0.5 shrink-0" />
-                    : a.severity === 'warning' ? <AlertTriangle size={11} className="text-yellow-400 mt-0.5 shrink-0" />
-                    : <CheckCircle size={11} className="text-green-400 mt-0.5 shrink-0" />}
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs text-slate-300">{a.message}</div>
-                    <div className="text-xs text-slate-600 mt-0.5">{formatTime(a.created_at)} · {a.type.replace(/_/g,' ')}</div>
-                  </div>
-                  <span className="text-xs shrink-0" style={{ color: a.severity === 'critical' ? '#f87171' : a.severity === 'warning' ? '#facc15' : '#4ade80' }}>
-                    {a.severity}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {!loading && tab === 'predictions' && (
-            <div className="space-y-1">
-              {predictions.length === 0 && <div className="text-xs text-slate-500 text-center py-8">No predictions recorded yet</div>}
-              {predictions.map((p) => (
-                <div key={p.id} className="flex items-center gap-3 px-3 py-2" style={{ background: '#080d14', borderBottom: '1px solid #1a2540' }}>
-                  <TrendingUp size={11} className="text-blue-400 shrink-0" />
-                  <div className="flex-1 text-xs">
-                    <span className="text-slate-300">Health: </span>
-                    <span style={{ color: p.health_score >= 70 ? '#4ade80' : p.health_score >= 40 ? '#facc15' : '#f87171' }}>{p.health_score}%</span>
-                    <span className="text-slate-500 ml-3">Bearing: {p.bearing_wear_pct}%</span>
-                    <span className="text-slate-500 ml-2">Overheat: {p.overheating_risk_pct}%</span>
-                    <span className="text-slate-500 ml-2">RUL: {p.rul_hours}h</span>
-                  </div>
-                  <span className="text-xs text-slate-600 shrink-0">{formatTime(p.predicted_at)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {!loading && tab === 'maintenance' && (
-            <div className="space-y-1">
-              {logs.length === 0 && <div className="text-xs text-slate-500 text-center py-8">No maintenance logs recorded</div>}
-              {logs.map((l) => (
-                <div key={l.id} className="px-3 py-2" style={{ background: '#080d14', borderBottom: '1px solid #1a2540' }}>
-                  <div className="flex justify-between items-start">
-                    <span className="text-xs text-slate-200">{l.action}</span>
-                    <span className="text-xs text-slate-600 shrink-0 ml-2">{formatTime(l.performed_at)}</span>
-                  </div>
-                  {l.notes && <div className="text-xs text-slate-500 mt-0.5">{l.notes}</div>}
-                  <div className="text-xs text-slate-600 mt-0.5">by {l.performed_by}</div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="px-4 pb-3 shrink-0">
-          <button onClick={onClose} className="btn-secondary px-6 py-2">Close</button>
         </div>
       </div>
     </div>

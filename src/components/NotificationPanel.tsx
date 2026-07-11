@@ -1,112 +1,138 @@
-import { CheckCircle, AlertTriangle, X, Bell } from 'lucide-react';
+import { X, Bell, AlertTriangle, AlertCircle, Info } from 'lucide-react';
 import { useMonitoring } from '../contexts/MonitoringContext';
+import type { Alert, AlertSeverity } from '../types';
 
-interface Props {
+interface NotificationPanelProps {
   onClose: () => void;
 }
 
-export function NotificationPanel({ onClose }: Props) {
-  const { recentAlerts, machines, markAlertsRead, unreadCount } = useMonitoring();
+const COLORS = {
+  border: '#1e2d45',
+  text: '#94a3b8',
+  grid: '#1a2540',
+};
 
-  function machineName(id: string) {
-    return machines.find((m) => m.id === id)?.name ?? 'Machine';
-  }
+function severityIcon(severity: AlertSeverity) {
+  if (severity === 'critical') return AlertCircle;
+  if (severity === 'warning') return AlertTriangle;
+  return Info;
+}
 
-  function formatTime(ts: string) {
-    const d = new Date(ts);
-    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
-  }
+function severityColor(severity: AlertSeverity) {
+  if (severity === 'critical') return '#ef4444';
+  if (severity === 'warning') return '#eab308';
+  return '#3b82f6';
+}
+
+function formatTime(iso: string) {
+  const d = new Date(iso);
+  const now = new Date();
+  const diff = now.getTime() - d.getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return d.toLocaleDateString('en-US', { month: 'short', day: '2-digit' });
+}
+
+function AlertRow({ alert }: { alert: Alert }) {
+  const Icon = severityIcon(alert.severity);
+  const color = severityColor(alert.severity);
 
   return (
-    <>
+    <div
+      className="flex items-start gap-2 px-3 py-2.5"
+      style={{ borderBottom: `1px solid ${COLORS.grid}` }}
+    >
       <div
-        className="fixed inset-0 z-40"
-        style={{ background: 'rgba(0,0,0,0.5)' }}
-        onClick={onClose}
-      />
+        className="flex-shrink-0 flex items-center justify-center"
+        style={{ width: 24, height: 24, background: `${color}15`, border: `1px solid ${color}40` }}
+      >
+        <Icon size={12} style={{ color }} />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[10px] font-semibold tracking-wide uppercase" style={{ color }}>
+            {alert.severity}
+          </span>
+          <span className="text-[9px]" style={{ color: COLORS.text }}>
+            {formatTime(alert.created_at)}
+          </span>
+        </div>
+        <div className="text-[11px] mt-0.5" style={{ color: '#c8d6ea' }}>
+          {alert.message}
+        </div>
+        <div className="text-[9px] mt-0.5" style={{ color: COLORS.text }}>
+          {alert.type.replace(/_/g, ' ')}
+        </div>
+      </div>
+      {!alert.is_read && (
+        <div style={{ width: 6, height: 6, borderRadius: '50%', background: color, marginTop: 4, flexShrink: 0 }} />
+      )}
+    </div>
+  );
+}
+
+export default function NotificationPanel({ onClose }: NotificationPanelProps) {
+  const { recentAlerts, unreadCount } = useMonitoring();
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
       <div
-        className="fixed right-0 top-0 bottom-0 z-50 flex flex-col"
+        className="h-full"
         style={{
-          width: 340,
+          width: 360,
+          maxWidth: '90vw',
           background: '#0e1726',
-          borderLeft: '1px solid #1e2d45',
-          boxShadow: '-8px 0 30px rgba(0,0,0,0.6)',
-          animation: 'panel-slide-in 0.2s ease-out',
+          border: `1px solid ${COLORS.border}`,
+          boxShadow: '-8px 0 40px rgba(0,0,0,0.8)',
+          animation: 'panel-slide-in 0.3s ease',
         }}
+        onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div
-          className="flex items-center justify-between px-4 py-3 shrink-0"
-          style={{ borderBottom: '1px solid #1e2d45', background: 'linear-gradient(180deg,#151f33 0%,#0f1726 100%)' }}
+          className="flex items-center justify-between px-4 py-3"
+          style={{
+            borderBottom: `1px solid ${COLORS.border}`,
+            background: 'linear-gradient(180deg,#151f33 0%,#0f1726 100%)',
+          }}
         >
-          <div className="flex items-center gap-2">
-            <Bell size={14} className="text-blue-400" />
-            <span className="text-sm font-semibold text-slate-200">Notifications</span>
+          <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-200 tracking-wide">
+            <Bell size={13} className="text-slate-400" />
+            NOTIFICATIONS
             {unreadCount > 0 && (
               <span
-                className="text-xs px-1.5 py-0.5"
-                style={{ background: '#7f1d1d', border: '1px solid #ef4444', color: '#fca5a5' }}
+                className="px-1.5 py-0.5 text-[9px] font-bold"
+                style={{ background: '#ef4444', color: '#fff', borderRadius: 8 }}
               >
-                {unreadCount} unread
+                {unreadCount}
               </span>
             )}
-          </div>
-          <button onClick={onClose} className="text-slate-500 hover:text-slate-300">
-            <X size={16} />
+          </span>
+          <button onClick={onClose}>
+            <X size={14} className="text-slate-500 hover:text-slate-300" />
           </button>
         </div>
 
-        {/* Mark all read */}
-        {unreadCount > 0 && (
-          <div className="px-4 py-2 shrink-0" style={{ borderBottom: '1px solid #1e2d45' }}>
-            <button
-              onClick={() => markAlertsRead()}
-              className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
-            >
-              Mark all as read
-            </button>
-          </div>
-        )}
-
-        {/* List */}
-        <div className="flex-1 overflow-y-auto">
+        {/* Content */}
+        <div style={{ maxHeight: 'calc(100vh - 52px)', overflowY: 'auto' }}>
           {recentAlerts.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full gap-2">
-              <CheckCircle size={32} className="text-slate-700" />
-              <span className="text-xs text-slate-600">No notifications</span>
+            <div className="flex flex-col items-center justify-center py-16 gap-2">
+              <Bell size={28} style={{ color: COLORS.text, opacity: 0.4 }} />
+              <span className="text-[11px]" style={{ color: COLORS.text }}>
+                No alerts
+              </span>
+              <span className="text-[9px]" style={{ color: COLORS.text, opacity: 0.6 }}>
+                System is running normally
+              </span>
             </div>
           ) : (
-            recentAlerts.map((alert) => (
-              <div
-                key={alert.id}
-                className="flex items-start gap-2.5 px-4 py-3"
-                style={{
-                  borderBottom: '1px solid #1a2540',
-                  background: alert.is_read ? 'transparent' : 'rgba(59,130,246,0.04)',
-                }}
-              >
-                {alert.severity === 'critical' ? (
-                  <AlertTriangle size={14} className="text-red-400 mt-0.5 shrink-0" />
-                ) : alert.severity === 'warning' ? (
-                  <AlertTriangle size={14} className="text-yellow-400 mt-0.5 shrink-0" />
-                ) : (
-                  <CheckCircle size={14} className="text-green-400 mt-0.5 shrink-0" />
-                )}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-slate-200">{machineName(alert.machine_id)}</span>
-                    {!alert.is_read && (
-                      <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#3b82f6', flexShrink: 0 }} />
-                    )}
-                  </div>
-                  <p className="text-xs text-slate-400 mt-0.5">{alert.message}</p>
-                  <span className="text-xs text-slate-600 mt-1 block">{formatTime(alert.created_at)}</span>
-                </div>
-              </div>
-            ))
+            recentAlerts.map((alert) => <AlertRow key={alert.id} alert={alert} />)
           )}
         </div>
       </div>
-    </>
+    </div>
   );
 }

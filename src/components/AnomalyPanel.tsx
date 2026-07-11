@@ -1,123 +1,206 @@
-import { AlertTriangle, CheckCircle, List } from 'lucide-react';
+import { Activity, AlertTriangle, ShieldCheck, Wrench, Thermometer, Zap, Clock, Lightbulb } from 'lucide-react';
 import { useMonitoring } from '../contexts/MonitoringContext';
 
-export function AnomalyPanel() {
-  const { aiAnalysis, recentAlerts, machines } = useMonitoring();
+const COLORS = {
+  bg: '#080d14',
+  border: '#1e2d45',
+  text: '#94a3b8',
+  grid: '#1a2540',
+  green: '#22c55e',
+  yellow: '#eab308',
+  red: '#ef4444',
+  blue: '#3b82f6',
+  cyan: '#06b6d4',
+  orange: '#f97316',
+};
 
-  function machineName(id: string) { return machines.find((m) => m.id === id)?.name ?? 'Machine'; }
-  function formatTime(ts: string) {
-    const d = new Date(ts);
-    return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
+function healthColor(score: number) {
+  if (score > 70) return COLORS.green;
+  if (score >= 40) return COLORS.yellow;
+  return COLORS.red;
+}
+
+function statusBadge(status: string) {
+  const map: Record<string, { color: string; label: string }> = {
+    healthy: { color: COLORS.green, label: 'HEALTHY' },
+    warning: { color: COLORS.yellow, label: 'WARNING' },
+    critical: { color: COLORS.red, label: 'CRITICAL' },
+  };
+  const s = map[status] ?? map.healthy;
+  return (
+    <span
+      className="px-2 py-0.5 text-[10px] font-bold tracking-wider"
+      style={{ color: s.color, border: `1px solid ${s.color}`, background: `${s.color}15` }}
+    >
+      {s.label}
+    </span>
+  );
+}
+
+function MetricBar({ icon: Icon, label, value, color }: { icon: typeof Wrench; label: string; value: number; color: string }) {
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <span className="flex items-center gap-1.5 text-[10px]" style={{ color: COLORS.text }}>
+          <Icon size={11} />
+          {label}
+        </span>
+        <span className="text-[11px] font-bold" style={{ color }}>
+          {value}%
+        </span>
+      </div>
+      <div style={{ height: 4, background: COLORS.grid, borderRadius: 2, overflow: 'hidden' }}>
+        <div
+          style={{
+            width: `${Math.min(100, Math.max(0, value))}%`,
+            height: '100%',
+            background: color,
+            transition: 'width 0.3s ease',
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+export default function AnomalyPanel() {
+  const { aiAnalysis } = useMonitoring();
+
+  if (!aiAnalysis) {
+    return (
+      <div className="panel" style={{ background: COLORS.bg, padding: 12 }}>
+        <span className="text-[10px] font-semibold tracking-wider" style={{ color: COLORS.text }}>
+          AI ANOMALY DETECTION
+        </span>
+        <div className="flex items-center justify-center py-8 text-[11px]" style={{ color: COLORS.text }}>
+          No data available
+        </div>
+      </div>
+    );
   }
 
-  const isWarning = aiAnalysis?.status === 'warning';
-  const isCritical = aiAnalysis?.status === 'critical';
-  const hasAnomaly = isWarning || isCritical;
+  const {
+    healthScore,
+    status,
+    bearingWear,
+    overheatRisk,
+    failureRisk,
+    rulHours,
+    anomalies,
+    recommendation,
+  } = aiAnalysis;
+
+  const hc = healthColor(healthScore);
 
   return (
-    <div
-      className="flex flex-col"
-      style={{ width: 250, minWidth: 250, borderLeft: '1px solid #1e2d45', background: '#0e1420' }}
-    >
-      {/* Main anomaly detection section */}
-      <div className="px-3 py-2" style={{ borderBottom: '1px solid #1e2d45' }}>
-        <div className="text-sm font-semibold text-slate-200 mb-2">Anomaly Detection</div>
+    <div className="panel" style={{ background: COLORS.bg, padding: 0 }}>
+      {/* Header */}
+      <div
+        className="flex items-center justify-between px-3 py-1.5"
+        style={{ borderBottom: `1px solid ${COLORS.border}` }}
+      >
+        <span className="flex items-center gap-1.5 text-[10px] font-semibold tracking-wider" style={{ color: COLORS.text }}>
+          <Activity size={11} style={{ color: COLORS.cyan }} />
+          AI ANOMALY DETECTION
+        </span>
+        {statusBadge(status)}
+      </div>
 
-        {/* Status box */}
-        <div
-          className="flex items-center gap-2 px-2 py-2 mb-3"
-          style={hasAnomaly ? {
-            background: isCritical ? 'linear-gradient(135deg,#1a0000 0%,#2a0a0a 100%)' : 'linear-gradient(135deg,#1a1500 0%,#2a1f00 100%)',
-            border: `1px solid ${isCritical ? '#7f1d1d' : '#ca8a04'}`,
-            borderLeft: `3px solid ${isCritical ? '#ef4444' : '#eab308'}`,
-          } : {
-            background: 'linear-gradient(135deg,#001a00 0%,#0a1a0a 100%)',
-            border: '1px solid #14532d',
-            borderLeft: '3px solid #22c55e',
-          }}
-        >
-          <AlertTriangle
-            size={14}
-            className={isCritical ? 'text-red-400 shrink-0' : isWarning ? 'text-yellow-400 shrink-0' : 'text-green-400 shrink-0'}
-          />
-          <span
-            className="text-xs font-semibold"
-            style={{ color: isCritical ? '#fca5a5' : isWarning ? '#fde047' : '#86efac' }}
+      <div className="p-3 space-y-3">
+        {/* Health Score */}
+        <div className="flex items-center gap-3">
+          <div
+            className="flex items-center justify-center"
+            style={{
+              width: 56,
+              height: 56,
+              border: `2px solid ${hc}`,
+              borderRadius: '50%',
+              background: `${hc}10`,
+              boxShadow: `0 0 12px ${hc}40`,
+            }}
           >
-            {isCritical ? 'CRITICAL: Immediate Action Required'
-              : isWarning ? `Warning: ${aiAnalysis?.anomalies[0] ?? 'Anomaly Detected'}`
-              : 'System Operating Normally'}
+            <span className="text-xl font-bold" style={{ color: hc }}>
+              {healthScore}
+            </span>
+          </div>
+          <div className="flex-1">
+            <div className="text-[9px] tracking-wider" style={{ color: COLORS.text }}>
+              HEALTH SCORE
+            </div>
+            <div className="text-[10px]" style={{ color: hc }}>
+              {status === 'healthy' ? 'Optimal condition' : status === 'warning' ? 'Attention required' : 'Critical state'}
+            </div>
+            <div className="flex items-center gap-1 mt-1 text-[9px]" style={{ color: COLORS.text }}>
+              <ShieldCheck size={10} style={{ color: hc }} />
+              {healthScore > 70 ? 'No anomalies detected' : `${anomalies.length} anomaly(ies) detected`}
+            </div>
+          </div>
+        </div>
+
+        {/* Metrics */}
+        <div className="space-y-2">
+          <MetricBar icon={Wrench} label="Bearing Wear" value={bearingWear} color={COLORS.orange} />
+          <MetricBar icon={Thermometer} label="Overheat Risk" value={overheatRisk} color={COLORS.red} />
+          <MetricBar icon={Zap} label="Failure Risk" value={failureRisk} color={COLORS.red} />
+        </div>
+
+        {/* RUL */}
+        <div
+          className="flex items-center justify-between px-2 py-1.5"
+          style={{ background: COLORS.grid, border: `1px solid ${COLORS.border}` }}
+        >
+          <span className="flex items-center gap-1.5 text-[10px]" style={{ color: COLORS.text }}>
+            <Clock size={11} style={{ color: COLORS.cyan }} />
+            Remaining Useful Life
+          </span>
+          <span className="text-[12px] font-bold" style={{ color: COLORS.cyan }}>
+            {rulHours.toLocaleString()} h
           </span>
         </div>
 
-        {/* Status details */}
-        <div className="space-y-1.5 text-xs">
-          <div className="flex items-center gap-1.5">
-            <span className="text-slate-400">Status:</span>
-            {hasAnomaly
-              ? <><AlertTriangle size={11} className={isCritical ? 'text-red-400' : 'text-yellow-400'} />
-                <span className="font-semibold" style={{ color: isCritical ? '#f87171' : '#facc15' }}>
-                  {isCritical ? 'Critical' : 'Warning'}
-                </span></>
-              : <><CheckCircle size={11} className="text-green-400" /><span className="text-green-400 font-semibold">Healthy</span></>
-            }
+        {/* Anomalies */}
+        <div>
+          <div className="flex items-center gap-1.5 text-[10px] font-semibold mb-1.5" style={{ color: COLORS.text }}>
+            <AlertTriangle size={11} style={{ color: COLORS.yellow }} />
+            ANOMALIES
           </div>
-          <div className="flex items-center gap-1.5">
-            <span className="text-slate-400">Vibration Alert:</span>
-            <span className="text-slate-200 font-medium">
-              {aiAnalysis && aiAnalysis.bearingWear > 35 ? '2x RPM Detected' : 'Normal'}
-            </span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="text-slate-400">Temperature:</span>
-            <span
-              className="font-medium"
-              style={{ color: aiAnalysis && aiAnalysis.overheatRisk > 30 ? '#f87171' : '#4ade80' }}
-            >
-              {aiAnalysis && aiAnalysis.overheatRisk > 30 ? 'Elevated' : 'Normal'}
-            </span>
-          </div>
-          {aiAnalysis && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-slate-400">Health:</span>
-              <span className="font-bold" style={{ color: aiAnalysis.healthScore >= 70 ? '#4ade80' : aiAnalysis.healthScore >= 40 ? '#facc15' : '#f87171' }}>
-                {aiAnalysis.healthScore}%
-              </span>
+          {anomalies.length === 0 ? (
+            <div className="text-[10px] px-2 py-1.5" style={{ color: COLORS.green, background: `${COLORS.green}10` }}>
+              No anomalies detected
+            </div>
+          ) : (
+            <div style={{ maxHeight: 100, overflowY: 'auto' }}>
+              {anomalies.map((a, i) => (
+                <div
+                  key={i}
+                  className="anomaly-log-item flex items-start gap-1.5"
+                  style={{ color: COLORS.text }}
+                >
+                  <span style={{ color: COLORS.yellow }}>•</span>
+                  <span>{a}</span>
+                </div>
+              ))}
             </div>
           )}
         </div>
-      </div>
 
-      {/* Anomaly log */}
-      <div className="flex-1 overflow-hidden flex flex-col">
-        <div className="flex items-center justify-between px-3 py-1.5" style={{ borderBottom: '1px solid #1e2d45' }}>
-          <span className="text-xs font-semibold text-slate-200">Anomaly Detection</span>
-          <List size={12} className="text-slate-500" />
-        </div>
-
-        <div className="flex-1 overflow-y-auto">
-          {recentAlerts.length === 0 ? (
-            <div className="px-3 py-4 text-xs text-slate-600 text-center">No recent events</div>
-          ) : (
-            recentAlerts.slice(0, 10).map((alert) => (
-              <div
-                key={alert.id}
-                className="flex items-start gap-1.5 px-2 py-1.5"
-                style={{ borderBottom: '1px solid #1a2540' }}
-              >
-                <span className="text-slate-500 shrink-0 mt-0.5" style={{ fontSize: 9 }}>{formatTime(alert.created_at)}</span>
-                {alert.severity === 'critical'
-                  ? <AlertTriangle size={10} className="text-red-400 mt-0.5 shrink-0" />
-                  : alert.severity === 'warning'
-                  ? <AlertTriangle size={10} className="text-yellow-400 mt-0.5 shrink-0" />
-                  : <CheckCircle size={10} className="text-green-400 mt-0.5 shrink-0" />}
-                <span style={{ fontSize: 10 }} className="text-slate-300">
-                  <span className="font-medium">{machineName(alert.machine_id)}:</span>{' '}
-                  <span className="text-slate-400">{alert.message.length > 25 ? alert.message.slice(0, 25) + '...' : alert.message}</span>
-                </span>
-              </div>
-            ))
-          )}
+        {/* Recommendation */}
+        <div>
+          <div className="flex items-center gap-1.5 text-[10px] font-semibold mb-1.5" style={{ color: COLORS.text }}>
+            <Lightbulb size={11} style={{ color: COLORS.blue }} />
+            RECOMMENDATION
+          </div>
+          <div
+            className="text-[10px] leading-relaxed px-2 py-1.5"
+            style={{
+              color: COLORS.text,
+              background: `${COLORS.blue}08`,
+              border: `1px solid ${COLORS.border}`,
+            }}
+          >
+            {recommendation}
+          </div>
         </div>
       </div>
     </div>

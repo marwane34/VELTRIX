@@ -1,21 +1,16 @@
 import {
-  createContext, useContext, useEffect, useState,
-  useRef, ReactNode,
+  createContext, useContext, useEffect, useState, useRef, ReactNode,
 } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from './AuthContext';
 import { useSimulatedData } from '../hooks/useSimulatedData';
-import { runAIAnalysis } from '../hooks/useAI';
+import { runAIAnalysis } from '../hooks/useSimulatedData';
 import type { Machine, Alert, AIAnalysis, Sensor, Setting } from '../types';
 import type { VibrationPoint, FreqBar, TrendPoint } from '../hooks/useSimulatedData';
 
 export interface LiveReading {
-  temperature?: number;
-  rmsX?: number;
-  rmsY?: number;
-  current?: number;
-  rpm?: number;
-  voltage?: number;
+  temperature?: number; rmsX?: number; rmsY?: number;
+  current?: number; rpm?: number; voltage?: number;
 }
 
 interface MonitoringContextValue {
@@ -30,11 +25,7 @@ interface MonitoringContextValue {
   freqBars: FreqBar[];
   currentTrend: TrendPoint[];
   tempTrend: TrendPoint[];
-  temperature: number;
-  currentVal: number;
-  rmsX: number;
-  rmsY: number;
-  rpm: number;
+  temperature: number; currentVal: number; rmsX: number; rmsY: number; rpm: number;
   timestamp: string;
   aiAnalysis: AIAnalysis | null;
   recentAlerts: Alert[];
@@ -60,248 +51,143 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
   const [selectedMachineId, setSelectedMachineId] = useState<string | null>(null);
   const [monitoring, setMonitoring] = useState(true);
   const [simulateLoad, setSimulateLoad] = useState(false);
-  const [recentAlerts, setRecentAlerts] = useState<Alert[]>([]);
   const [sensors, setSensors] = useState<Sensor[]>([]);
+  const [recentAlerts, setRecentAlerts] = useState<Alert[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [settings, setSettings] = useState<Setting[]>([]);
   const [liveReading, setLiveReading] = useState<LiveReading | null>(null);
   const liveReadingRef = useRef<LiveReading | null>(null);
+  const liveReadingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   liveReadingRef.current = liveReading;
 
   const anomalyLevel = simulateLoad ? 0.75 : 0.35;
   const simData = useSimulatedData(monitoring, anomalyLevel);
 
   const selectedMachine = machines.find((m) => m.id === selectedMachineId) ?? machines[0] ?? null;
-
   const dataSource: 'simulated' | 'live' = liveReading ? 'live' : 'simulated';
-
   const displayTemp = liveReading?.temperature ?? simData.temperature;
   const displayRmsX = liveReading?.rmsX ?? simData.rmsX;
   const displayRmsY = liveReading?.rmsY ?? simData.rmsY;
   const displayCurrent = liveReading?.current ?? simData.currentVal;
   const displayRpm = liveReading?.rpm ?? simData.rpm;
 
-  // AI analysis on every tick — uses live data when available, simulated otherwise
   const aiAnalysis: AIAnalysis | null = selectedMachine
-    ? runAIAnalysis(
-        {
-          temperature: displayTemp,
-          rmsX: displayRmsX,
-          rmsY: displayRmsY,
-          current: displayCurrent,
-          rpm: displayRpm,
-        },
-        selectedMachine
-      )
+    ? runAIAnalysis({ temperature: displayTemp, rmsX: displayRmsX, rmsY: displayRmsY, current: displayCurrent, rpm: displayRpm }, selectedMachine)
     : null;
 
   function pushLiveReading(reading: LiveReading) {
     setLiveReading(reading);
-    // Clear live reading after 10s of no data to fall back to simulated
-    if (liveReadingRef.current) clearTimeout(liveReadingTimeoutRef.current);
+    if (liveReadingTimeoutRef.current) clearTimeout(liveReadingTimeoutRef.current);
     liveReadingTimeoutRef.current = setTimeout(() => setLiveReading(null), 10000);
   }
 
   async function refreshMachines() {
     if (!user) return;
     const { data } = await supabase.from('machines').select('*').eq('user_id', user.id).order('created_at');
-    if (data) setMachines(data);
+    if (data) { setMachines(data as Machine[]); if (data.length > 0 && !selectedMachineId) setSelectedMachineId(data[0].id); }
   }
 
   async function refreshSensors() {
     if (!user) return;
     const { data } = await supabase.from('sensors').select('*').eq('user_id', user.id).order('created_at');
-    if (data) setSensors(data);
+    if (data) setSensors(data as Sensor[]);
   }
 
   async function refreshSettings() {
     if (!user) return;
-    const { data } = await supabase.from('settings').select('*').eq('user_id', user.id).order('category');
-    if (data) setSettings(data);
+    const { data } = await supabase.from('settings').select('*').eq('user_id', user.id);
+    if (data) setSettings(data as Setting[]);
   }
 
-  async function saveSetting(key: string, value: string, category = 'general') {
+  async function refreshAlerts() {
     if (!user) return;
-    await supabase.from('settings').upsert({
-      user_id: user.id,
-      key,
-      value,
-      category,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'user_id,key' });
-    await refreshSettings();
-  }
-
-  async function loadAlerts() {
-    if (!user) return;
-    const { data } = await supabase
-      .from('alerts')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(20);
-    if (data) setRecentAlerts(data);
-  }
-
-  useEffect(() => {
-    if (!user) return;
-    refreshMachines();
-    refreshSensors();
-    refreshSettings();
-    loadAlerts();
-
-    const alertSub = supabase
-      .channel('alerts-realtime')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'alerts', filter: `user_id=eq.${user.id}` }, () => {
-        loadAlerts();
-      })
-      .subscribe();
-
-    return () => { alertSub.unsubscribe(); };
-  }, [user]);
-
-  // Persist snapshot every 5s when monitoring
-  const persistTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const lastAlertRef = useRef<number>(0);
-  const liveReadingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  async function persistSnapshot() {
-    if (!user || !selectedMachine) return;
-
-    await supabase.from('sensor_snapshots').insert({
-      machine_id: selectedMachine.id,
-      user_id: user.id,
-      temperature: displayTemp,
-      vibration_rms: +((displayRmsX + displayRmsY) / 2).toFixed(3),
-      current: displayCurrent,
-      rpm: displayRpm,
-      voltage: liveReading?.voltage ?? 220 + (Math.random() - 0.5) * 5,
-    });
-
-    // Write to sensor_data table for each sensor type
-    const machineSensors = sensors.filter((s) => s.machine_id === selectedMachine.id);
-    if (machineSensors.length > 0) {
-      const sensorReadings: Record<string, number> = {
-        vibration: +((displayRmsX + displayRmsY) / 2).toFixed(3),
-        temperature: displayTemp,
-        current: displayCurrent,
-        rpm: displayRpm,
-        voltage: liveReading?.voltage ?? 220 + (Math.random() - 0.5) * 5,
-      };
-      const sensorUnits: Record<string, string> = {
-        vibration: 'g', temperature: '°C', current: 'A', rpm: 'RPM', voltage: 'V',
-      };
-      const records = machineSensors
-        .filter((s) => s.type in sensorReadings)
-        .map((s) => ({
-          sensor_id: s.id,
-          machine_id: selectedMachine.id,
-          user_id: user.id,
-          value: sensorReadings[s.type],
-          unit: s.unit || sensorUnits[s.type] || '',
-          quality: 'good',
-        }));
-      if (records.length > 0) {
-        await supabase.from('sensor_data').insert(records);
-      }
-    }
-
-    await supabase.from('machine_health').upsert({
-      machine_id: selectedMachine.id,
-      user_id: user.id,
-      rms_x: displayRmsX,
-      rms_y: displayRmsY,
-      temperature: displayTemp,
-      current: displayCurrent,
-      rpm: displayRpm,
-      voltage: liveReading?.voltage ?? 220,
-      health_score: aiAnalysis?.healthScore ?? 100,
-      status: aiAnalysis?.status ?? 'healthy',
-      updated_at: new Date().toISOString(),
-    });
-
-    // Fire alert if anomaly and cooldown elapsed (60s)
-    const now = Date.now();
-    if (aiAnalysis && aiAnalysis.status !== 'healthy' && now - lastAlertRef.current > 60000) {
-      lastAlertRef.current = now;
-      const type = aiAnalysis.bearingWear > 40 ? 'bearing_wear'
-        : aiAnalysis.overheatRisk > 40 ? 'overheating'
-        : 'abnormal_vibration';
-      const severity = aiAnalysis.status === 'critical' ? 'critical' : 'warning';
-      await supabase.from('alerts').insert({
-        machine_id: selectedMachine.id,
-        user_id: user.id,
-        type,
-        severity,
-        message: aiAnalysis.anomalies[0] ?? `${severity} condition detected`,
-        is_read: false,
-      });
-
-      // Update prediction
-      await supabase.from('predictions').insert({
-        machine_id: selectedMachine.id,
-        user_id: user.id,
-        health_score: aiAnalysis.healthScore,
-        status: aiAnalysis.status,
-        bearing_wear_pct: aiAnalysis.bearingWear,
-        overheating_risk_pct: aiAnalysis.overheatRisk,
-        failure_risk_pct: aiAnalysis.failureRisk,
-        rul_hours: aiAnalysis.rulHours,
-      });
-    }
-  }
-
-  useEffect(() => {
-    if (!monitoring || !selectedMachine) return;
-    persistTimerRef.current = setInterval(persistSnapshot, 5000);
-    return () => {
-      if (persistTimerRef.current) clearInterval(persistTimerRef.current);
-    };
-  }, [monitoring, selectedMachine, displayTemp, displayCurrent, displayRpm, aiAnalysis]);
-
-  function selectMachine(id: string) {
-    setSelectedMachineId(id);
+    const { data } = await supabase.from('alerts').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(50);
+    if (data) { setRecentAlerts(data as Alert[]); setUnreadCount((data as Alert[]).filter(a => !a.is_read).length); }
   }
 
   async function markAlertsRead() {
     if (!user) return;
     await supabase.from('alerts').update({ is_read: true }).eq('user_id', user.id).eq('is_read', false);
-    await loadAlerts();
+    setUnreadCount(0);
   }
 
-  const unreadCount = recentAlerts.filter((a) => !a.is_read).length;
+  async function saveSetting(key: string, value: string, category = 'general') {
+    if (!user) return;
+    const existing = settings.find(s => s.key === key);
+    if (existing) {
+      await supabase.from('settings').update({ value, updated_at: new Date().toISOString() }).eq('id', existing.id);
+    } else {
+      await supabase.from('settings').insert({ user_id: user.id, key, value, category });
+    }
+    refreshSettings();
+  }
+
+  const persistTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastAlertRef = useRef<number>(0);
+
+  async function persistSnapshot() {
+    if (!user || !selectedMachine) return;
+    await supabase.from('sensor_snapshots').insert({
+      machine_id: selectedMachine.id, user_id: user.id,
+      temperature: displayTemp, vibration_rms: +((displayRmsX + displayRmsY) / 2).toFixed(3),
+      current: displayCurrent, rpm: displayRpm,
+      voltage: liveReading?.voltage ?? 220 + (Math.random() - 0.5) * 5,
+    });
+    const sensorReadings: Record<string, number> = {
+      vibration: +((displayRmsX + displayRmsY) / 2).toFixed(3), temperature: displayTemp,
+      current: displayCurrent, rpm: displayRpm,
+      voltage: liveReading?.voltage ?? 220 + (Math.random() - 0.5) * 5,
+    };
+    const machineSensors = sensors.filter(s => s.machine_id === selectedMachine.id);
+    if (machineSensors.length > 0) {
+      const records = machineSensors.map(s => ({
+        sensor_id: s.id, machine_id: selectedMachine.id, user_id: user.id,
+        value: sensorReadings[s.type] ?? 0, unit: s.unit, quality: 'good',
+      }));
+      await supabase.from('sensor_data').insert(records);
+    }
+    await supabase.from('machine_health').upsert({
+      machine_id: selectedMachine.id, user_id: user.id,
+      rms_x: displayRmsX, rms_y: displayRmsY, temperature: displayTemp,
+      current: displayCurrent, rpm: displayRpm,
+      voltage: liveReading?.voltage ?? 220,
+      health_score: aiAnalysis?.healthScore ?? 100, status: aiAnalysis?.status ?? 'healthy',
+      updated_at: new Date().toISOString(),
+    });
+    if (aiAnalysis && aiAnalysis.status !== 'healthy' && Date.now() - lastAlertRef.current > 30000) {
+      lastAlertRef.current = Date.now();
+      await supabase.from('alerts').insert({
+        machine_id: selectedMachine.id, user_id: user.id,
+        type: aiAnalysis.status === 'critical' ? 'abnormal_vibration' : 'bearing_wear',
+        severity: aiAnalysis.status === 'critical' ? 'critical' : 'warning',
+        message: aiAnalysis.anomalies[0] ?? 'Anomaly detected', is_read: false,
+      });
+      refreshAlerts();
+    }
+  }
+
+  useEffect(() => {
+    if (user) { refreshMachines(); refreshSensors(); refreshSettings(); refreshAlerts(); }
+  }, [user]);
+
+  useEffect(() => {
+    if (monitoring && selectedMachine) {
+      persistTimerRef.current = setInterval(persistSnapshot, 5000);
+      return () => { if (persistTimerRef.current) clearInterval(persistTimerRef.current); };
+    }
+  }, [monitoring, selectedMachine, displayTemp, displayCurrent, displayRpm, aiAnalysis]);
+
+  function selectMachine(id: string) { setSelectedMachineId(id); }
 
   return (
-    <MonitoringContext.Provider
-      value={{
-        machines,
-        selectedMachine,
-        selectMachine,
-        monitoring,
-        setMonitoring,
-        simulateLoad,
-        setSimulateLoad,
-        ...simData,
-        temperature: displayTemp,
-        currentVal: displayCurrent,
-        rmsX: displayRmsX,
-        rmsY: displayRmsY,
-        rpm: displayRpm,
-        aiAnalysis,
-        recentAlerts,
-        unreadCount,
-        refreshMachines,
-        refreshSensors,
-        refreshSettings,
-        saveSetting,
-        sensors,
-        settings,
-        markAlertsRead,
-        persistSnapshot,
-        liveReading,
-        pushLiveReading,
-        dataSource,
-      }}
-    >
+    <MonitoringContext.Provider value={{
+      machines, selectedMachine, selectMachine, monitoring, setMonitoring,
+      simulateLoad, setSimulateLoad, ...simData,
+      temperature: displayTemp, currentVal: displayCurrent, rmsX: displayRmsX, rmsY: displayRmsY, rpm: displayRpm,
+      aiAnalysis, recentAlerts, unreadCount, refreshMachines, refreshSensors, refreshSettings,
+      saveSetting, sensors, settings, markAlertsRead, persistSnapshot,
+      liveReading, pushLiveReading, dataSource,
+    }}>
       {children}
     </MonitoringContext.Provider>
   );

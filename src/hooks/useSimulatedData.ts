@@ -1,133 +1,93 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import type { AIAnalysis, Machine } from '../types';
 
-export interface VibrationPoint {
-  t: number;
-  x: number;
-  y: number;
-  z: number;
-}
+export interface VibrationPoint { t: number; x: number; y: number; }
+export interface FreqBar { freq: number; amp: number; }
+export interface TrendPoint { t: number; v: number; }
 
-export interface FreqBar {
-  freq: number;
-  amplitude: number;
-  isRed: boolean;
-}
-
-export interface TrendPoint {
-  t: number;
-  value: number;
-}
-
-export function generateVibration(offset: number, anomalyLevel = 0): VibrationPoint[] {
-  const points: VibrationPoint[] = [];
-  const count = 200;
-  const al = anomalyLevel; // 0-1
-  for (let i = 0; i < count; i++) {
-    const t = (i / count) * 6;
-    const to = t + offset * 0.3;
-    const x =
-      Math.sin(2 * Math.PI * to * 1.2) * (1.8 + al * 1.2) +
-      Math.sin(2 * Math.PI * to * 2.4) * (0.5 + al * 0.8) +
-      Math.sin(2 * Math.PI * to * 0.6) * 0.9 +
-      (Math.random() - 0.5) * (0.3 + al * 0.5);
-    const y =
-      Math.sin(2 * Math.PI * to * 1.8 + 1.2) * (1.4 + al * 0.8) +
-      Math.sin(2 * Math.PI * to * 3.0 + 0.8) * 0.4 +
-      (Math.random() - 0.5) * (0.25 + al * 0.4);
-    const z =
-      Math.sin(2 * Math.PI * to * 2.5 + 2.0) * 0.9 +
-      Math.sin(2 * Math.PI * to * 1.0 + 1.5) * 0.5 +
-      (Math.random() - 0.5) * 0.2;
-    points.push({ t, x, y, z });
-  }
-  return points;
-}
-
-export function generateFrequencyBars(anomalyLevel = 0): FreqBar[] {
-  const bars: FreqBar[] = [];
-  const freqSteps = [
-    0.8, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0, 2.2, 2.4, 2.6,
-    2.8, 3.0, 3.2, 3.4, 3.6, 3.8, 4.0, 4.2, 4.4, 4.6,
-    4.8, 5.0, 5.2, 5.4, 5.6,
-  ];
-  const al = anomalyLevel;
-  freqSteps.forEach((f) => {
-    let amp = Math.random() * 0.12 + 0.02;
-    let isRed = false;
-    if (f >= 0.9 && f <= 1.1) { amp = 0.42 + Math.random() * 0.08; }
-    if (f >= 1.9 && f <= 2.2) { amp = 0.60 + al * 0.25 + Math.random() * 0.12; isRed = true; }
-    if (f >= 4.6 && f <= 5.4) { amp = 0.50 + al * 0.35 + Math.random() * 0.15; isRed = true; }
-    if (f >= 3.0 && f <= 3.4) { amp = 0.16 + al * 0.2 + Math.random() * 0.08; isRed = al > 0.3; }
-    bars.push({ freq: f, amplitude: Math.min(amp, 0.99), isRed });
-  });
-  return bars;
-}
-
-export function generateCurrentTrend(offset: number, targetCurrent: number): TrendPoint[] {
-  const points: TrendPoint[] = [];
-  const count = 80;
-  for (let i = 0; i < count; i++) {
-    const t = i / count;
-    const base = (targetCurrent - 1.8) * t + 1.0;
-    const noise = (Math.random() - 0.5) * 0.3 + Math.sin(t * 12 + offset) * 0.12;
-    points.push({ t: i, value: Math.max(0, base + noise) });
-  }
-  return points;
-}
-
-export function generateTemperatureTrend(offset: number, targetTemp: number): TrendPoint[] {
-  const points: TrendPoint[] = [];
-  const count = 20;
-  for (let i = 0; i < count; i++) {
-    const t = i / count;
-    const base = (targetTemp - 2) + t * 2.5;
-    const noise = Math.sin(t * 8 + offset * 0.5) * 0.3 + (Math.random() - 0.5) * 0.2;
-    points.push({ t: i, value: base + noise });
-  }
-  return points;
-}
-
-export function useSimulatedData(active: boolean, anomalyLevel = 0.4) {
-  const tickRef = useRef(0);
-  const [vibration, setVibration] = useState<VibrationPoint[]>(() => generateVibration(0, anomalyLevel));
-  const [freqBars, setFreqBars] = useState<FreqBar[]>(() => generateFrequencyBars(anomalyLevel));
-  const [currentTrend, setCurrentTrend] = useState<TrendPoint[]>(() => generateCurrentTrend(0, 2.9));
-  const [tempTrend, setTempTrend] = useState<TrendPoint[]>(() => generateTemperatureTrend(0, 78.5));
-  const [temperature, setTemperature] = useState(78.5);
-  const [currentVal, setCurrentVal] = useState(2.9);
+export function useSimulatedData(running: boolean, anomalyLevel: number) {
+  const [vibration, setVibration] = useState<VibrationPoint[]>([]);
+  const [freqBars, setFreqBars] = useState<FreqBar[]>([]);
+  const [currentTrend, setCurrentTrend] = useState<TrendPoint[]>([]);
+  const [tempTrend, setTempTrend] = useState<TrendPoint[]>([]);
+  const [temperature, setTemperature] = useState(45);
+  const [currentVal, setCurrentVal] = useState(2.0);
   const [rmsX, setRmsX] = useState(0.8);
-  const [rmsY, setRmsY] = useState(2.1);
-  const [rpm, setRpm] = useState(1450);
-  const [timestamp, setTimestamp] = useState('12:06:23');
-
-  const tick = useCallback(() => {
-    tickRef.current += 1;
-    const t = tickRef.current;
-    setVibration(generateVibration(t, anomalyLevel));
-    if (t % 4 === 0) setFreqBars(generateFrequencyBars(anomalyLevel));
-
-    const tempBase = 78.5 + anomalyLevel * 8;
-    const currBase = 2.9 + anomalyLevel * 1.2;
-    const newTemp = +(tempBase + Math.sin(t * 0.12) * 0.4 + Math.random() * 0.15).toFixed(1);
-    const newCurr = +(currBase + Math.sin(t * 0.18) * 0.3 + Math.random() * 0.1).toFixed(1);
-
-    setCurrentTrend(generateCurrentTrend(t * 0.1, newCurr));
-    setTempTrend(generateTemperatureTrend(t * 0.05, newTemp));
-    setTemperature(newTemp);
-    setCurrentVal(newCurr);
-    setRmsX(+(0.8 + anomalyLevel * 1.2 + Math.random() * 0.1).toFixed(2));
-    setRmsY(+(2.1 + anomalyLevel * 0.8 + Math.random() * 0.1).toFixed(2));
-    setRpm(Math.round(1450 + anomalyLevel * 120 + (Math.random() - 0.5) * 40));
-
-    const now = new Date();
-    setTimestamp(`${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`);
-  }, [anomalyLevel]);
+  const [rmsY, setRmsY] = useState(0.6);
+  const [rpm, setRpm] = useState(1500);
+  const [timestamp, setTimestamp] = useState(new Date().toISOString());
+  const tRef = useRef(0);
 
   useEffect(() => {
-    if (!active) return;
-    const id = setInterval(tick, 200);
-    return () => clearInterval(id);
-  }, [active, tick]);
+    if (!running) return;
+    const interval = setInterval(() => {
+      const t = tRef.current++;
+      setTimestamp(new Date().toISOString());
+
+      const baseX = Math.sin(t * 0.3) * 0.5 + (Math.random() - 0.5) * 0.3;
+      const baseY = Math.cos(t * 0.25) * 0.4 + (Math.random() - 0.5) * 0.2;
+      const noiseX = (Math.random() - 0.5) * anomalyLevel * 2;
+      const noiseY = (Math.random() - 0.5) * anomalyLevel * 1.5;
+
+      setVibration((prev) => [...prev.slice(-199), { t, x: baseX + noiseX, y: baseY + noiseY }]);
+
+      const rmsXVal = Math.sqrt((baseX + noiseX) ** 2);
+      const rmsYVal = Math.sqrt((baseY + noiseY) ** 2);
+      setRmsX(+rmsXVal.toFixed(3));
+      setRmsY(+rmsYVal.toFixed(3));
+
+      const newTemp = 45 + Math.sin(t * 0.05) * 10 + anomalyLevel * 15 + (Math.random() - 0.5) * 2;
+      setTemperature(+newTemp.toFixed(1));
+      setTempTrend((prev) => [...prev.slice(-59), { t, v: +newTemp.toFixed(1) }]);
+
+      const newCurrent = 2.0 + Math.sin(t * 0.08) * 0.5 + anomalyLevel * 1.5 + (Math.random() - 0.5) * 0.3;
+      setCurrentVal(+newCurrent.toFixed(2));
+      setCurrentTrend((prev) => [...prev.slice(-59), { t, v: +newCurrent.toFixed(2) }]);
+
+      const newRpm = 1500 + Math.sin(t * 0.03) * 50 + (Math.random() - 0.5) * 20;
+      setRpm(Math.round(newRpm));
+
+      if (t % 5 === 0) {
+        const bars: FreqBar[] = [];
+        for (let f = 1; f <= 32; f++) {
+          const amp = (Math.sin(f * 0.5) * 0.3 + 0.5) * (1 + anomalyLevel * Math.exp(-f / 10));
+          bars.push({ freq: f * 25, amp: +amp.toFixed(3) });
+        }
+        setFreqBars(bars);
+      }
+    }, 100);
+    return () => clearInterval(interval);
+  }, [running, anomalyLevel]);
 
   return { vibration, freqBars, currentTrend, tempTrend, temperature, currentVal, rmsX, rmsY, rpm, timestamp };
+}
+
+export function runAIAnalysis(
+  readings: { temperature: number; rmsX: number; rmsY: number; current: number; rpm: number },
+  machine: Machine
+): AIAnalysis {
+  const vibRms = (readings.rmsX + readings.rmsY) / 2;
+  const tempRatio = readings.temperature / machine.temp_max;
+  const vibRatio = vibRms / machine.rms_max;
+  const currRatio = readings.current / machine.current_max;
+
+  const bearingWear = Math.min(100, Math.max(0, (vibRatio - 0.5) * 60 + (tempRatio - 0.5) * 30));
+  const overheatRisk = Math.min(100, Math.max(0, (tempRatio - 0.7) * 80));
+  const failureRisk = Math.min(100, Math.max(0, bearingWear * 0.4 + overheatRisk * 0.3 + (currRatio - 0.7) * 50));
+  const healthScore = Math.max(0, Math.min(100, 100 - failureRisk * 0.8 - bearingWear * 0.2));
+
+  const anomalies: string[] = [];
+  if (vibRatio > 0.8) anomalies.push('Vibration exceeds 80% of threshold');
+  if (tempRatio > 0.85) anomalies.push('Temperature approaching critical limit');
+  if (currRatio > 0.8) anomalies.push('Current draw abnormally high');
+  if (readings.rpm < 1200) anomalies.push('RPM below expected operating range');
+
+  const status: AIAnalysis['status'] = healthScore > 70 ? 'healthy' : healthScore > 40 ? 'warning' : 'critical';
+  const rulHours = Math.max(0, Math.round((100 - bearingWear) * 50 + (healthScore * 10)));
+
+  let recommendation = 'All systems operating within normal parameters.';
+  if (status === 'warning') recommendation = 'Schedule preventive maintenance within 2 weeks. Monitor bearing temperatures closely.';
+  if (status === 'critical') recommendation = 'Immediate maintenance required. Risk of failure is high. Reduce load and inspect bearings.';
+
+  return { healthScore: Math.round(healthScore), status, bearingWear: Math.round(bearingWear), overheatRisk: Math.round(overheatRisk), failureRisk: Math.round(failureRisk), rulHours, anomalies, recommendation };
 }
