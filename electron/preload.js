@@ -1,0 +1,25 @@
+const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('electronAPI', {
+  minimize: () => ipcRenderer.invoke('window:minimize'),
+  maximizeToggle: () => ipcRenderer.invoke('window:maximizeToggle'),
+  isMaximized: () => ipcRenderer.invoke('window:isMaximized'),
+  close: () => ipcRenderer.invoke('window:close'),
+  toggleFullscreen: () => ipcRenderer.invoke('window:toggleFullscreen'),
+  isFullscreen: () => ipcRenderer.invoke('window:isFullscreen'),
+  getTheme: () => ipcRenderer.invoke('theme:get'),
+  toggleTheme: () => ipcRenderer.invoke('theme:toggle'),
+  setTheme: (theme) => ipcRenderer.invoke('theme:set', theme),
+  showNotification: (title, body) => ipcRenderer.invoke('notification:show', title, body),
+  getAppVersion: () => ipcRenderer.invoke('app:getVersion'),
+  getAutoLaunch: () => ipcRenderer.invoke('autoLaunch:get'),
+  setAutoLaunch: (enabled) => ipcRenderer.invoke('autoLaunch:set', enabled),
+  checkForUpdates: () => ipcRenderer.invoke('update:check'),
+  downloadUpdate: () => ipcRenderer.invoke('update:download'),
+  installUpdate: () => ipcRenderer.invoke('update:install'),
+  onUpdateAvailable: (callback) => ipcRenderer.on('update-available', (_, info) => callback(info)),
+  onUpdateDownloaded: (callback) => ipcRenderer.on('update-downloaded', (_, info) => callback(info)),
+  onUpdateProgress: (callback) => ipcRenderer.on('update-progress', (_, progress) => callback(progress)),
+  platform: process.platform,
+  isElectron: true,
+});

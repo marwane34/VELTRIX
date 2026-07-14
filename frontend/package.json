@@ -1,0 +1,83 @@
+{
+  "name": "veltrix-dashboard",
+  "version": "1.0.0",
+  "description": "VELTRIX Predictive Maintenance SCADA System",
+  "author": { "name": "VELTRIX Technologies", "email": "info@veltrixtech.com" },
+  "main": "../electron/main.js",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "electron": "npm run build && electron ../electron/main.js",
+    "electron:dev": "concurrently \"vite\" \"wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron ../electron/main.js\"",
+    "build-electron": "npm run build && electron-builder --win",
+    "dist": "npm run build && electron-builder --win nsis portable",
+    "dist:nsis": "npm run build && electron-builder --win nsis",
+    "dist:portable": "npm run build && electron-builder --win portable",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "build": {
+    "appId": "com.veltrixtech.scada",
+    "productName": "VELTRIX",
+    "copyright": "Copyright © 2026 VELTRIX Technologies",
+    "directories": { "output": "release", "buildResources": "../build" },
+    "files": ["dist/**/*", "../electron/**/*"],
+    "extraResources": [{ "from": "../assets/icon.ico", "to": "icon.ico" }],
+    "win": {
+      "icon": "../assets/icon.ico",
+      "target": [
+        { "target": "nsis", "arch": ["x64", "ia32"] },
+        { "target": "portable", "arch": ["x64", "ia32"] }
+      ],
+      "publisherName": "VELTRIX Technologies",
+      "verifyUpdateCodeSignature": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "../assets/icon.ico",
+      "uninstallerIcon": "../assets/icon.ico",
+      "installerHeaderIcon": "../assets/icon.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "VELTRIX SCADA",
+      "uninstallDisplayName": "VELTRIX Predictive Maintenance SCADA",
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true,
+      "installerLanguages": ["en_US"],
+      "language": "1033"
+    },
+    "portable": { "artifactName": "VELTRIX-Portable-${version}.exe" },
+    "publish": { "provider": "github", "owner": "VELTRIX-Technologies", "repo": "veltrix-scada", "releaseType": "release" }
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
+    "electron-updater": "^6.3.9",
+    "electron-settings": "^4.0.4",
+    "lucide-react": "^0.460.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "jspdf": "^2.5.2",
+    "jspdf-autotable": "^3.8.4",
+    "xlsx": "^0.18.5",
+    "html2canvas": "^1.4.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "concurrently": "^9.1.0",
+    "cross-env": "^7.0.3",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.16",
+    "typescript": "^5.7.2",
+    "vite": "^5.4.11",
+    "wait-on": "^8.0.1"
+  }
+}
