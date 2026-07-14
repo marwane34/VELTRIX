@@ -1,15 +1,14 @@
-import os
-from dotenv import load_dotenv
-from supabase import create_client, Client
+"""
+VELTRIX SCADA API — Supabase Client Singleton
+"""
+from app.config import settings
 
-load_dotenv()
+_supabase = None
 
-_supabase: Client = None
 
-def get_supabase() -> Client:
+def get_supabase():
     global _supabase
     if _supabase is None:
-        url = os.getenv("SUPABASE_URL", "")
-        key = os.getenv("SUPABASE_ANON_KEY", "")
-        _supabase = create_client(url, key)
+        from supabase import create_client, Client
+        _supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_ANON_KEY)
     return _supabase

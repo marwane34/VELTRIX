@@ -1,10 +1,16 @@
-import serial
-import serial.tools.list_ports
 from typing import Optional, Callable
 import threading
 import logging
 
 logger = logging.getLogger(__name__)
+
+try:
+    import serial
+    import serial.tools.list_ports
+    _SERIAL_AVAILABLE = True
+except ImportError:
+    _SERIAL_AVAILABLE = False
+    serial = None
 
 class SerialCommunication:
     def __init__(self, port: str = None, baud_rate: int = 115200, data_bits: int = 8, parity: str = "none", stop_bits: int = 1):

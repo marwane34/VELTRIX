@@ -1,8 +1,14 @@
-import paho.mqtt.client as mqtt
 from typing import Optional, Callable
 import logging
 
 logger = logging.getLogger(__name__)
+
+try:
+    import paho.mqtt.client as mqtt
+    _MQTT_AVAILABLE = True
+except ImportError:
+    _MQTT_AVAILABLE = False
+    mqtt = None
 
 class MQTTCommunication:
     def __init__(self, broker: str = "broker.hivemq.com", port: int = 1883, topic: str = "veltrix/sensors/+", client_id: str = "veltrix_client", username: str = None, password: str = None):

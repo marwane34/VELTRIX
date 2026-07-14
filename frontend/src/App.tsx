@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, lazy, Suspense } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { MonitoringProvider } from './contexts/MonitoringContext';
 import { CommunicationProvider } from './contexts/CommunicationContext';
@@ -6,13 +6,22 @@ import { ToastProvider } from './components/Toast';
 import { AppLayout } from './components/AppLayout';
 import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
-import Dashboard from './pages/Dashboard';
-import MachinesPage from './pages/MachinesPage';
-import AlertsPage from './pages/AlertsPage';
-import AnalyticsPage from './pages/AnalyticsPage';
-import CommunicationPage from './pages/CommunicationPage';
-import ExportHistoryPage from './pages/ExportHistoryPage';
 import type { NavItem } from './types';
+
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const MachinesPage = lazy(() => import('./pages/MachinesPage'));
+const AlertsPage = lazy(() => import('./pages/AlertsPage'));
+const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage'));
+const CommunicationPage = lazy(() => import('./pages/CommunicationPage'));
+const ExportHistoryPage = lazy(() => import('./pages/ExportHistoryPage'));
+
+function PageLoader() {
+  return (
+    <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center' }}>
+      <div className="loading-spinner" />
+    </div>
+  );
+}
 
 function AppContent() {
   const { user, loading } = useAuth();
@@ -20,7 +29,6 @@ function AppContent() {
   const [activeNav, setActiveNav] = useState<NavItem>('dashboard');
   const [showNotifications, setShowNotifications] = useState(false);
 
-  // Loading spinner
   if (loading) {
     return (
       <div
@@ -38,7 +46,6 @@ function AppContent() {
     );
   }
 
-  // No user — show Login or Register
   if (!user) {
     if (showRegister) {
       return <RegisterPage onNavigateLogin={() => setShowRegister(false)} />;
@@ -46,7 +53,6 @@ function AppContent() {
     return <LoginPage onNavigateRegister={() => setShowRegister(true)} />;
   }
 
-  // Authenticated — render full app with all providers
   const handleNavigate = (nav: NavItem) => {
     setActiveNav(nav);
     setShowNotifications(false);
@@ -84,7 +90,9 @@ function AppContent() {
             onNavigate={handleNavigate}
             onOpenNotifications={handleOpenNotifications}
           >
-            {renderPage()}
+            <Suspense fallback={<PageLoader />}>
+              {renderPage()}
+            </Suspense>
           </AppLayout>
         </ToastProvider>
       </CommunicationProvider>

@@ -1,11 +1,12 @@
-from fastapi import APIRouter, HTTPException
-from ..services.supabase_client import get_supabase
+from fastapi import APIRouter
 
 router = APIRouter()
+
 
 @router.get("/")
 async def list_alerts():
     return {"alerts": [], "message": "Alerts are generated in real-time by the AI engine"}
+
 
 @router.get("/recommendations")
 async def list_recommendations():
