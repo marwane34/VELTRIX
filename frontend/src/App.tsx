@@ -1,106 +1,41 @@
-import { useState, lazy, Suspense } from 'react';
-import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { MonitoringProvider } from './contexts/MonitoringContext';
-import { CommunicationProvider } from './contexts/CommunicationContext';
-import { ToastProvider } from './components/Toast';
-import { AppLayout } from './components/AppLayout';
-import { LoginPage } from './pages/LoginPage';
-import { RegisterPage } from './pages/RegisterPage';
-import type { NavItem } from './types';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { configStatus } from './lib/supabase';
 
-const Dashboard = lazy(() => import('./pages/Dashboard'));
-const MachinesPage = lazy(() => import('./pages/MachinesPage'));
-const AlertsPage = lazy(() => import('./pages/AlertsPage'));
-const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage'));
-const CommunicationPage = lazy(() => import('./pages/CommunicationPage'));
-const ExportHistoryPage = lazy(() => import('./pages/ExportHistoryPage'));
-
-function PageLoader() {
+function ConfigError() {
   return (
-    <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center' }}>
-      <div className="loading-spinner" />
+    <div style={{ padding: '2rem', maxWidth: '600px', margin: '2rem auto' }}>
+      <h1 style={{ color: 'var(--accent-red)', fontSize: '1.5rem', marginBottom: '1rem' }}>
+        Supabase Configuration Error
+      </h1>
+      <p style={{ color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+        The application cannot connect to Supabase. The following errors were detected:
+      </p>
+      <ul style={{ listStyle: 'none', padding: 0 }}>
+        {configStatus.errors.map((e, i) => (
+          <li key={i} style={{ color: 'var(--accent-red)', padding: '0.5rem 0', borderBottom: '1px solid var(--border-primary)' }}>
+            {e}
+          </li>
+        ))}
+      </ul>
+      <p style={{ color: 'var(--text-muted)', marginTop: '1rem', fontSize: '0.875rem' }}>
+        Fix frontend/.env with valid Supabase credentials and restart the application.
+      </p>
     </div>
   );
 }
 
 function AppContent() {
-  const { user, loading } = useAuth();
-  const [showRegister, setShowRegister] = useState(false);
-  const [activeNav, setActiveNav] = useState<NavItem>('dashboard');
-  const [showNotifications, setShowNotifications] = useState(false);
-
+  const { loading } = useAuth();
   if (loading) {
-    return (
-      <div
-        style={{
-          height: '100vh',
-          width: '100%',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: 'var(--bg-primary)',
-        }}
-      >
-        <div className="loading-spinner" style={{ width: 32, height: 32 }} />
-      </div>
-    );
+    return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>Loading...</div>;
   }
-
-  if (!user) {
-    if (showRegister) {
-      return <RegisterPage onNavigateLogin={() => setShowRegister(false)} />;
-    }
-    return <LoginPage onNavigateRegister={() => setShowRegister(true)} />;
-  }
-
-  const handleNavigate = (nav: NavItem) => {
-    setActiveNav(nav);
-    setShowNotifications(false);
-  };
-
-  const handleOpenNotifications = () => {
-    setShowNotifications(true);
-  };
-
-  const renderPage = () => {
-    switch (activeNav) {
-      case 'dashboard':
-        return <Dashboard />;
-      case 'machines':
-        return <MachinesPage />;
-      case 'alerts':
-        return <AlertsPage />;
-      case 'analytics':
-        return <AnalyticsPage />;
-      case 'communication':
-        return <CommunicationPage />;
-      case 'export_history':
-        return <ExportHistoryPage />;
-      default:
-        return <Dashboard />;
-    }
-  };
-
-  return (
-    <MonitoringProvider>
-      <CommunicationProvider>
-        <ToastProvider>
-          <AppLayout
-            activeNav={activeNav}
-            onNavigate={handleNavigate}
-            onOpenNotifications={handleOpenNotifications}
-          >
-            <Suspense fallback={<PageLoader />}>
-              {renderPage()}
-            </Suspense>
-          </AppLayout>
-        </ToastProvider>
-      </CommunicationProvider>
-    </MonitoringProvider>
-  );
+  return <div style={{ padding: '2rem' }}>VELTRIX SCADA</div>;
 }
 
 export default function App() {
+  if (!configStatus.valid) {
+    return <ConfigError />;
+  }
   return (
     <AuthProvider>
       <AppContent />

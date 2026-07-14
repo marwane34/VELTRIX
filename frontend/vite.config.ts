@@ -4,16 +4,5 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   base: './',
-  build: {
-    outDir: 'dist',
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          'react-vendor': ['react', 'react-dom'],
-          'supabase': ['@supabase/supabase-js'],
-          'export-libs': ['jspdf', 'jspdf-autotable', 'xlsx', 'html2canvas'],
-        },
-      },
-    },
-  },
+  build: { outDir: 'dist', sourcemap: false },
 });
