@@ -145,29 +145,22 @@ if (!configStatus.valid) {
 
 /**
  * Supabase client singleton.
- * If env vars are invalid, this is `null` — callers must check.
+ *
+ * Always non-null so consumers don't need null checks.
+ * If env vars are invalid, a dummy client is created — App.tsx
+ * gates rendering behind configStatus.valid, so the dummy is
+ * never used in practice.
  */
-export const supabase: SupabaseClient | null = configStatus.valid
-  ? createClient(SUPABASE_URL!, SUPABASE_ANON_KEY!, {
-      auth: {
-        persistSession: true,
-        autoRefreshToken: true,
-        detectSessionInUrl: true,
-      },
-    })
-  : null;
-
-/**
- * Get the Supabase client or throw a readable error if misconfigured.
- */
-export function getSupabase(): SupabaseClient {
-  if (!supabase) {
-    throw new Error(
-      'Supabase is not configured. ' +
-      configStatus.errors.join(' ')
-    );
-  }
-  return supabase;
-}
+export const supabase: SupabaseClient = createClient(
+  SUPABASE_URL  || 'https://placeholder.supabase.co',
+  SUPABASE_ANON_KEY || 'placeholder-anon-key',
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+    },
+  },
+);
 
 export { configStatus };

@@ -508,7 +508,7 @@ export const exportScreenshot = async (element: HTMLElement): Promise<Blob> => {
 
   return new Promise<Blob>((resolve, reject) => {
     canvas.toBlob(
-      (blob) => {
+      (blob: Blob | null) => {
         if (blob) resolve(blob);
         else reject(new Error('Failed to generate screenshot blob.'));
       },

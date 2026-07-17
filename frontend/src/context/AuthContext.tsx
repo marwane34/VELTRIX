@@ -29,11 +29,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<AuthError | null>(null);
 
   useEffect(() => {
-    if (!supabase) {
-      setLoading(false);
-      return;
-    }
-
     supabase.auth.getSession().then(({ data, error: err }) => {
       if (err) {
         console.error('Session restore failed:', classifySupabaseError(err));
@@ -54,14 +49,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signIn = async (email: string, password: string) => {
     setError(null);
-    if (!supabase) {
-      const msg = configStatus.errors.length
-        ? configStatus.errors.join(' ')
-        : 'Supabase client not initialized.';
-      const e: AuthError = { message: msg, code: 'CONFIG_ERROR' };
-      setError(e);
-      return { error: e };
-    }
     const { error: err } = await supabase.auth.signInWithPassword({ email, password });
     if (err) {
       const e: AuthError = { message: classifySupabaseError(err), code: err.name || 'AUTH_ERROR' };
@@ -73,14 +60,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signUp = async (email: string, password: string) => {
     setError(null);
-    if (!supabase) {
-      const msg = configStatus.errors.length
-        ? configStatus.errors.join(' ')
-        : 'Supabase client not initialized.';
-      const e: AuthError = { message: msg, code: 'CONFIG_ERROR' };
-      setError(e);
-      return { error: e };
-    }
     const { data, error: err } = await supabase.auth.signUp({
       email,
       password,
@@ -103,9 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = async () => {
     setError(null);
-    if (supabase) {
-      await supabase.auth.signOut();
-    }
+    await supabase.auth.signOut();
     setSession(null);
     setUser(null);
   };
